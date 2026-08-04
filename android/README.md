@@ -1,5 +1,7 @@
 # SOS File Transfer — Android
 
+By [Novosoft Labs](https://novosoftlabs.com/)
+
 Native Android sender/receiver (Kotlin + Jetpack Compose), sharing the same
 wire format as the web app in `../send`, `../receive` and `../shared`.
 

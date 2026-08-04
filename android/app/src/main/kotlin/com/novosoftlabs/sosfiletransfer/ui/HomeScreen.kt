@@ -113,7 +113,19 @@ fun HomeScreen(onSend: () -> Unit, onReceive: () -> Unit) {
                 "Files are not encrypted — anything on the sending screen is readable by any camera pointed at it. The property here is no network, not confidentiality.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 8.dp, bottom = 24.dp),
+                modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+            )
+        }
+
+        // Same wording as the web app's footer ("SOS File Transfer · by
+        // Novosoft Labs" in index.html/send/receive) — the two apps should
+        // credit the same way.
+        item {
+            Text(
+                "SOS File Transfer · by Novosoft Labs",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                modifier = Modifier.padding(bottom = 24.dp),
             )
         }
     }
