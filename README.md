@@ -155,7 +155,7 @@ Safari has never shipped the native `BarcodeDetector` API (WebKit bug
 
 ¹ Opening the standalone receiver from `file://` works on desktop Chrome/Firefox, but **iOS Safari and Android Chrome won't grant a camera to a local file** — serve it over http(s) instead, or use the hosted PWA.
 
-Three GitHub Actions workflows drive this, all in `.github/workflows`:
+Four GitHub Actions workflows drive this, all in `.github/workflows`:
 
 - **`ci.yml`** — runs on every push/PR: tests, both builds, a check that the
   hosted `receive` bundle stays under 20 KB (catches the standalone build's
@@ -165,6 +165,12 @@ Three GitHub Actions workflows drive this, all in `.github/workflows`:
   once under **Settings → Pages → Source → GitHub Actions**.
 - **`release.yml`** — on a `v*` tag, builds everything and attaches the site
   zip, both standalone HTML files, and a `SHA256SUMS.txt` to the release.
+- **`android.yml`** — on every push/PR touching `android/`: runs the
+  `:core` codec's golden-vector tests, then builds a debug APK and uploads
+  it as a workflow artifact (Actions tab → the run → Artifacts) — the
+  quickest way to get an installable build without setting up the Android
+  SDK locally. See [`android/README.md`](android/README.md) for the native
+  app's own status.
 
 <details>
 <summary><strong>Why the dev server needs https, and other camera gotchas</strong></summary>
