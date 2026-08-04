@@ -5,6 +5,8 @@
 **Send Over Screen.** Move a file between two devices using nothing but a
 screen and a camera — no network, no app, no account.
 
+By [Novosoft Labs](https://novosoftlabs.com/)
+
 [![License: MIT](https://img.shields.io/badge/license-MIT-3fdcc0.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D22-6fb8ff.svg)](package.json)
 [![Build](https://github.com/TheCyberBoy/SOS-File-Transfer/actions/workflows/ci.yml/badge.svg)](https://github.com/TheCyberBoy/SOS-File-Transfer/actions/workflows/ci.yml)
@@ -22,10 +24,10 @@ reassembles it, checksum-verified, entirely offline from that point on. Point
 a phone at a laptop, and the file just... arrives.
 
 <p align="center">
-  <img src="docs/receiving.jpg" width="420"
-       alt="A phone mid-transfer, reading a 2 MB image off a laptop screen at 129.2 KB/s" />
+  <img src="docs/sending.jpg" width="640"
+       alt="SOS File Transfer's sender, mid-stream: a real animated QR code carrying photo.jpg, 1.7 MB, K=614 blocks" />
   <br />
-  <sub>129 KB/s, phone to laptop, zero bytes over any network.</sub>
+  <sub>The actual sender, live — no network path to the device reading this screen.</sub>
 </p>
 
 ## What it does
