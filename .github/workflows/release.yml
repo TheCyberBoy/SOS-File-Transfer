@@ -28,6 +28,20 @@ jobs:
       - run: npm test
       - run: npm run build:all
 
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: "platforms;android-35 build-tools;35.0.0 platform-tools"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build Android APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew :core:test :app:assembleDebug --console=plain
+
       - name: Package artifacts
         run: |
           TAG="${{ inputs.tag || github.ref_name }}"
@@ -38,6 +52,11 @@ jobs:
           # The two self-contained pages: no server, no network, no install.
           cp dist-standalone/sos-file-transfer-sender.html "artifacts/sos-file-transfer-$TAG-sender.html"
           cp dist-standalone/sos-file-transfer-receiver.html "artifacts/sos-file-transfer-$TAG-receiver.html"
+          # Debug-keystore-signed, installs straight from a phone with no
+          # extra setup — same build android.yml already verifies on every
+          # push, just carried through to a proper release asset name
+          # instead of a generic Gradle "app-debug.apk".
+          cp android/app/build/outputs/apk/debug/app-debug.apk "artifacts/SOS-File-Transfer-$TAG.apk"
           (cd artifacts && sha256sum ./* > SHA256SUMS.txt)
           ls -la artifacts
 
