@@ -1,0 +1,8 @@
+<resources>
+    <!-- Real theming happens in Compose (ui/theme/Theme.kt) — this is just the
+         manifest-required base theme, used briefly before Compose takes over. -->
+    <style name="Theme.SosFileTransfer" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/calm_signal_bg</item>
+        <item name="android:statusBarColor">@color/calm_signal_bg</item>
+    </style>
+</resources>
