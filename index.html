@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- Sets data-theme synchronously, before first paint, from the saved
+         choice or the OS preference — the alternative is a flash of the
+         wrong theme on every load. shared/theme.ts only wires the toggle. -->
+    <script>
+      (function () {
+        var saved = null;
+        try { saved = localStorage.getItem("sos-theme"); } catch (e) {}
+        var theme = saved || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+        document.documentElement.dataset.theme = theme;
+        // Belt-and-suspenders: :root's `color-scheme` in style.css sets this
+        // too, but that sheet hasn't loaded yet at this point in <head> — an
+        // inline style takes effect immediately, which is what actually gets
+        // native widgets (a <select> popup's listbox, scrollbars) rendered in
+        // the right scheme from the first paint rather than racing the CSS.
+        document.documentElement.style.colorScheme = theme;
+      })();
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SOS File Transfer — send anything, screen to screen</title>
+    <meta
+      name="description"
+      content="Send a file or text between two devices with nothing but a screen and a camera. Fountain-coded animated QR codes, no network path in between. By Novosoft Labs."
+    />
+    <meta name="theme-color" content="#060b12" />
+
+    <!-- Absolute URLs: scrapers are inconsistent about resolving relative ones.
+         Set VITE_SITE_URL at build time when deploying elsewhere. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="SOS File Transfer" />
+    <meta property="og:title" content="SOS File Transfer — send anything, screen to screen" />
+    <meta
+      property="og:description"
+      content="Fountain-coded animated QR codes, screen to camera. No account, no pairing, no network path between the two devices. 129 KB/s phone to phone. By Novosoft Labs."
+    />
+    <meta property="og:url" content="%SITE_URL%" />
+    <meta property="og:image" content="%OG_IMAGE%" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="A phone mid-transfer, reading an animated QR code off a laptop screen at 129.2 KB/s."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <link rel="icon" href="./sos_logo.svg" type="image/svg+xml" />
+    <link rel="icon" href="./favicon-32.png" sizes="32x32" type="image/png" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <link rel="stylesheet" href="./shared/style.css" />
+  </head>
+  <body class="home-page">
+    <header class="site-header">
+      <a class="brand" href="./"><svg class="brand-logo" viewBox="0 0 32 32" fill="none" aria-hidden="true"><circle cx="8" cy="24" r="2.6" fill="currentColor" /><path d="M9.04 19.11 A5 5 0 0 1 12.89 22.96" stroke="currentColor" stroke-width="3.1" stroke-linecap="round" /><path d="M9.87 15.20 A9 9 0 0 1 16.80 22.13" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-opacity="0.72" /><path d="M10.70 11.28 A13 13 0 0 1 20.72 21.30" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-opacity="0.46" /></svg>SOS</a>
+      <nav class="pill-links" aria-label="Primary"><a class="pill-link" href="./send/">Send</a><a class="pill-link" href="./receive/">Receive</a></nav>
+      <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Switch theme">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>
+      </button>
+    </header>
+    <main class="home-shell">
+      <section class="hero-type">
+        <h1>Send anything.<br />Screen to screen.<br /><span class="hero-accent">No network.</span></h1>
+        <p class="hero-copy">
+          SOS — Send Over Screen. Move a file or a block of text from one screen to
+          another device's camera. No account, pairing, or cloud storage in between.
+        </p>
+      </section>
+
+      <section class="bento" aria-label="Choose a side">
+        <article class="bento-tile bento-send">
+          <div>
+            <p class="card-kicker">This screen transmits</p>
+            <h2>Send a file or text</h2>
+            <p>Any file up to %MAX_FILE_LABEL%, or a pasted text snippet up to %MAX_SNIPPET_LABEL%. Compressed when it helps, restored with its original name.</p>
+          </div>
+          <div class="card-actions">
+            <a class="action" href="./send/">Send <svg class="action-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h15"/><path d="M12 5l7 7-7 7"/></svg></a>
+          </div>
+        </article>
+
+        <article class="bento-tile bento-receive">
+          <div>
+            <p class="card-kicker">This camera receives</p>
+            <h2>Point and recover</h2>
+            <p>Detects on its own whether a file or text is arriving, and verifies it with SHA-256 before handing it over.</p>
+          </div>
+          <div class="card-actions">
+            <a class="action" href="./receive/">Receive <svg class="action-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v15"/><path d="M5 12l7 7 7-7"/></svg></a>
+          </div>
+        </article>
+
+        <article class="bento-tile bento-stat">
+          <p class="bento-stat-value">%MAX_FILE_LABEL%</p>
+          <p class="bento-stat-label">max file size, gzip'd automatically when it helps</p>
+        </article>
+
+        <article class="bento-tile bento-stat">
+          <p class="bento-stat-value">SHA-256</p>
+          <p class="bento-stat-label">verified before a received file is ever saved</p>
+        </article>
+
+        <article class="bento-tile bento-stat">
+          <p class="bento-stat-value">Zero</p>
+          <p class="bento-stat-label">network path, accounts, or pairing required</p>
+        </article>
+
+        <article class="bento-tile bento-stat">
+          <p class="bento-stat-value">~129 KB/s</p>
+          <p class="bento-stat-label">phone to phone, best case, close range</p>
+        </article>
+      </section>
+
+      <p class="privacy-note">
+        A network path is not required between the devices. The bytes travel as light.
+        Files are not encrypted, so anything on the sending screen is readable by any
+        camera pointed at it.
+      </p>
+    </main>
+    <footer class="site-footer">
+      <span class="footer-id">
+        <span>SOS File Transfer · by Novosoft Labs</span>
+        <span>v%APP_VERSION% · build %BUILD_ID% · <a href="https://github.com/TheCyberBoy/SOS-File-Transfer/blob/main/LICENSE">MIT</a></span>
+      </span>
+      <nav class="footer-links" aria-label="Project links">
+        <a href="https://github.com/TheCyberBoy/SOS-File-Transfer">GitHub</a>
+        <a href="https://github.com/TheCyberBoy/SOS-File-Transfer/releases">Releases</a>
+      </nav>
+    </footer>
+    <script type="module" src="./shared/home.ts"></script>
+  </body>
+</html>

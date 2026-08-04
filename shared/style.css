@@ -1,0 +1,1639 @@
+/* SOS File Transfer — "Calm Signal" design system.
+   Glassmorphism used the 2026 way: restrained, on cards/nav/HUDs that sit over
+   a soft moving gradient mesh, never as the whole surface. Every glass panel
+   keeps a semi-opaque fill + a visible 1px border behind its text — blur alone
+   is not a contrast strategy (see the accessibility fallback block below). */
+
+:root {
+  color-scheme: dark;
+  --bg-0: #060b12;
+  --bg: var(--bg-0);
+  --panel: rgba(255, 255, 255, 0.05);
+  --panel-strong: rgba(255, 255, 255, 0.08);
+  --surface-solid: #0e1620;
+  --glass-bg: rgba(255, 255, 255, 0.07);
+  --glass-bg-strong: rgba(255, 255, 255, 0.11);
+  --glass-border: rgba(255, 255, 255, 0.14);
+  --glass-blur: 20px;
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+  --line: rgba(255, 255, 255, 0.1);
+  --line-bright: rgba(255, 255, 255, 0.22);
+  --text: #eaf2f5;
+  --text-dim: #c7d6dc;
+  --muted: #8fa3ac;
+  --muted-dim: #6b7c84;
+  --accent: #3fdcc0;
+  --accent-hi: #6bebd3;
+  --accent-2: #6fb8ff;
+  /* Ink for text sitting ON the accent. Separate token because the light
+     theme needs this to go the other way. */
+  --accent-ink: #052420;
+  --green: #57d9a3;
+  --red: #ff8a80;
+  /* Behind the camera image: stays near-black in any theme. */
+  --viewport-bg: #04070a;
+  --accent-rgb: 63, 220, 192;
+  --accent-2-rgb: 111, 184, 255;
+  --bg-rgb: 6, 11, 18;
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 22px;
+  --radius-xl: 28px;
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  /* System stacks, not a web font: this app has to keep working with zero
+     external requests (offline PWA, single-file standalone builds), so a
+     fetched font family is off the table. SF Pro / Segoe UI Variable / Roboto
+     already read as warm, modern and humanist on their respective platforms. */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable",
+    "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg-0: #f4f8fa;
+  --panel: rgba(16, 32, 42, 0.04);
+  --panel-strong: rgba(16, 32, 42, 0.06);
+  --surface-solid: #ffffff;
+  --glass-bg: rgba(255, 255, 255, 0.55);
+  --glass-bg-strong: rgba(255, 255, 255, 0.74);
+  --glass-border: rgba(16, 32, 42, 0.1);
+  --glass-shadow: 0 8px 32px rgba(16, 32, 42, 0.1);
+  --line: rgba(16, 32, 42, 0.1);
+  --line-bright: rgba(16, 32, 42, 0.18);
+  --text: #10202a;
+  --text-dim: #2b3f49;
+  --muted: #5c7078;
+  --muted-dim: #7c8d93;
+  --accent: #0e9c88;
+  --accent-hi: #0b8977;
+  --accent-2: #2c7be0;
+  --accent-ink: #ffffff;
+  --green: #128a6b;
+  --red: #c43d3d;
+  --viewport-bg: #050a0d;
+  --accent-rgb: 14, 156, 136;
+  --accent-2-rgb: 44, 123, 224;
+  --bg-rgb: 244, 248, 250;
+}
+
+/* No-JS / pre-hydration safety net. The pages themselves set data-theme
+   synchronously from localStorage-or-OS before first paint (see the inline
+   script in <head>), so this only matters if that ever fails to run. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    color-scheme: light;
+    --bg-0: #f4f8fa;
+    --panel: rgba(16, 32, 42, 0.04);
+    --panel-strong: rgba(16, 32, 42, 0.06);
+    --surface-solid: #ffffff;
+    --glass-bg: rgba(255, 255, 255, 0.55);
+    --glass-bg-strong: rgba(255, 255, 255, 0.74);
+    --glass-border: rgba(16, 32, 42, 0.1);
+    --glass-shadow: 0 8px 32px rgba(16, 32, 42, 0.1);
+    --line: rgba(16, 32, 42, 0.1);
+    --line-bright: rgba(16, 32, 42, 0.18);
+    --text: #10202a;
+    --text-dim: #2b3f49;
+    --muted: #5c7078;
+    --muted-dim: #7c8d93;
+    --accent: #0e9c88;
+    --accent-hi: #0b8977;
+    --accent-2: #2c7be0;
+    --accent-ink: #ffffff;
+    --green: #128a6b;
+    --red: #c43d3d;
+    --viewport-bg: #050a0d;
+    --accent-rgb: 14, 156, 136;
+    --accent-2-rgb: 44, 123, 224;
+    --bg-rgb: 244, 248, 250;
+  }
+}
+
+/* Glassmorphism's known failure mode is contrast. Both switches below trade
+   translucency for a fully opaque surface rather than merely turning blur
+   off — a translucent-but-unblurred panel over a busy gradient is still a
+   contrast problem. */
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  :root {
+    --glass-bg: var(--surface-solid);
+    --glass-bg-strong: var(--surface-solid);
+    --glass-border: var(--line-bright);
+  }
+  .site-header,
+  .site-footer,
+  .bento-tile,
+  .file-picker,
+  .demo-picker,
+  .note-composer textarea,
+  details.settings,
+  .metric,
+  .received-note,
+  .no-signal,
+  .transfer-hud .progress,
+  .preview,
+  .progress {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  .home-page::before,
+  .tool-page::before,
+  .receiver-page::before {
+    display: none;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 400 16px/1.6 var(--font-sans);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 20px;
+  min-height: 100vh;
+}
+h1 {
+  font-size: 16px;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  margin: 0;
+  text-align: center;
+}
+h1 small {
+  color: var(--muted);
+  letter-spacing: 0;
+  font-weight: 400;
+}
+.hint {
+  color: var(--muted);
+  font-size: 13.5px;
+  text-align: center;
+  max-width: 640px;
+}
+a {
+  color: var(--accent);
+}
+/* Control hierarchy ---------------------------------------------------------
+   One accent, three jobs, kept visually apart:
+
+     solid accent   the single thing to do on this screen — Start camera,
+                    Start text stream, Save the recovered file
+     outlined       an alternative or a way back — Receive another, Try again
+     inset track    which mode you are in: a STATE, not an action
+
+   All three used to be the same filled slab, so on the text-snippet tab the
+   mode selector outshouted the button that actually starts the transfer. */
+button {
+  font: 700 17px/1 var(--font-sans);
+  color: var(--accent-ink);
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  border: 0;
+  border-radius: var(--radius-md);
+  padding: 15px 34px;
+  cursor: pointer;
+  box-shadow: 0 10px 30px -10px rgba(var(--accent-rgb), 0.55);
+  transition:
+    transform 180ms var(--ease-spring),
+    box-shadow 180ms ease,
+    filter 130ms ease;
+}
+
+button:hover {
+  filter: brightness(1.06);
+  box-shadow: 0 14px 36px -8px rgba(var(--accent-rgb), 0.6);
+}
+
+button:active {
+  transform: scale(0.97);
+}
+
+button:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button {
+    transition: box-shadow 130ms ease, filter 130ms ease;
+  }
+  button:active {
+    transform: none;
+  }
+}
+
+/* Author `display` rules beat the UA sheet's [hidden], so restate it. */
+[hidden] {
+  display: none !important;
+}
+
+.file-picker {
+  width: min(92vw, 640px);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text);
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  padding: 16px 18px;
+}
+.file-picker span {
+  color: var(--accent);
+  font-weight: 700;
+}
+.file-picker input {
+  max-width: 100%;
+  font: inherit;
+}
+/* Choosing a file is a step toward the action, not the action — and the
+   native control is the one element on the page that otherwise looks foreign. */
+.file-picker input {
+  color: var(--muted);
+}
+
+.file-picker input::file-selector-button {
+  margin-right: 12px;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--line-bright);
+  border-radius: var(--radius-sm);
+  padding: 8px 14px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 130ms ease, color 130ms ease;
+}
+
+.file-picker input::file-selector-button:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.stage {
+  background: #f4f4f6;
+  padding: 22px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+}
+.stage canvas {
+  display: block;
+  image-rendering: pixelated;
+  border-radius: 6px;
+}
+.preview {
+  position: relative;
+  width: min(92vw, 480px);
+}
+.preview video {
+  width: 100%;
+  border-radius: var(--radius-lg);
+  background: #000;
+  display: block;
+}
+.progress {
+  width: min(92vw, 480px);
+  height: 14px;
+  background: var(--glass-bg);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.progress-status {
+  width: min(92vw, 480px);
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.progress-status strong {
+  color: var(--accent);
+}
+.progress-status span {
+  text-align: right;
+}
+.progress > div {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  transition: width 0.25s var(--ease-out);
+}
+.progress > div.error {
+  background: var(--red);
+}
+.done {
+  color: var(--green);
+  font-size: 22px;
+  font-weight: 700;
+}
+.failed {
+  color: var(--red);
+  font-size: 22px;
+  font-weight: 700;
+}
+img.received {
+  max-width: min(92vw, 640px);
+  border-radius: var(--radius-lg);
+}
+#result {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+a.download {
+  display: inline-block;
+  color: var(--accent-ink);
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  border-radius: var(--radius-md);
+  padding: 13px 22px;
+  font-size: 16px;
+  font-weight: 700;
+  text-decoration: none;
+  box-shadow: 0 10px 30px -10px rgba(var(--accent-rgb), 0.55);
+  /* The label carries a filename, which is usually one unbroken word — so its
+     min-content width is the whole thing, and as a flex item it would refuse to
+     shrink and push the row off a phone screen. */
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+details.settings {
+  width: min(92vw, 640px);
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+}
+details.settings summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+details.settings .row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  padding-top: 10px;
+}
+details.settings label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+details.settings select,
+details.settings input[type="range"] {
+  font: inherit;
+  font-family: var(--font-mono);
+  /* 16px is the floor that stops mobile Safari zooming the page when a control
+     takes focus. The alternative — locking the viewport scale — breaks
+     pinch-zoom for everyone, so pay for it here instead. */
+  font-size: 16px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 5px 8px;
+}
+/* Themed replacement for the native <select> popup ------------------------
+   The closed control takes page CSS fine; the open popup is OS-drawn and
+   `color-scheme` isn't reliably honored there across browsers (Chromium on
+   Windows in particular), so there is no CSS-only way to keep it on-brand.
+   This is a full replacement, not a decoration: see shared/custom-select.ts —
+   the real <select> stays in the DOM as the value/event source of truth, so
+   nothing downstream had to change. If its script never runs, the native
+   .settings select above is still there, visible and already styled. */
+.custom-select {
+  position: relative;
+}
+
+.custom-select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 16px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 5px 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 130ms ease;
+}
+
+.custom-select-trigger:hover {
+  border-color: var(--line-bright);
+}
+
+.custom-select-trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.custom-select-trigger svg {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  color: var(--muted);
+  transition: transform 160ms var(--ease-spring);
+}
+
+.custom-select[data-open="true"] .custom-select-trigger svg {
+  transform: rotate(180deg);
+}
+
+/* Positioned in JS (shared/custom-select.ts) with viewport-computed top/left
+   in px, flipping above the trigger when there isn't room below — `fixed`,
+   not `absolute`, and portalled to <body>, because a `backdrop-filter`
+   ancestor (these settings panels are glass) establishes a containing block
+   for its descendants the same way `transform` does, which would otherwise
+   position this against the blurred panel instead of the viewport. */
+.custom-select-list {
+  position: fixed;
+  z-index: 1000;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  /* Solid, not glass: a popover has to stay legible over whatever page
+     content it ends up overlapping, which a translucent fill can't promise. */
+  background: var(--surface-solid);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--glass-shadow);
+  overflow-y: auto;
+}
+
+.custom-select-option {
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.custom-select-option:hover,
+.custom-select-option:focus-visible,
+.custom-select-option[aria-selected="true"] {
+  background: rgba(var(--accent-rgb), 0.14);
+  color: var(--accent);
+  outline: none;
+}
+
+.settings-actual {
+  margin: 10px 0 2px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 8px;
+  width: min(92vw, 640px);
+}
+.metric {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  padding: 7px 9px;
+}
+.metric .k {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.metric .v {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+.metric .v.amber {
+  color: var(--accent);
+}
+.metric .v.ok {
+  color: var(--green);
+}
+
+/* Product shell ------------------------------------------------------------
+   "Calm Signal": deep navy-teal glass over a soft, slow-drifting gradient
+   mesh. Every literal colour left in this file is functional (the QR quiet
+   zone, the letterbox behind the camera) — everything else is a token. */
+
+/* Column flex (gap zeroed — the base body gap would pad between header, main
+   and footer) so the shells can grow and keep the footer at the bottom of
+   short pages, like the receiver before its camera starts. */
+.home-page,
+.tool-page,
+.receiver-page {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+  min-height: 100svh;
+  position: relative;
+  background: var(--bg);
+  overflow-x: clip;
+}
+
+/* The gradient mesh lives on a fixed pseudo-layer behind everything, animated
+   on transform (cheap) rather than background-position (expensive), and
+   turned off entirely under reduced motion / reduced transparency. */
+.home-page::before,
+.tool-page::before,
+.receiver-page::before {
+  content: "";
+  position: fixed;
+  inset: -12%;
+  z-index: -1;
+  background:
+    radial-gradient(38% 30% at 18% 12%, rgba(var(--accent-2-rgb), 0.2), transparent 70%),
+    radial-gradient(42% 34% at 86% 6%, rgba(var(--accent-rgb), 0.18), transparent 70%),
+    radial-gradient(55% 42% at 50% 105%, rgba(var(--accent-rgb), 0.12), transparent 70%);
+  filter: blur(60px);
+  animation: mesh-drift 28s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+@keyframes mesh-drift {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    transform: translate3d(-2.5%, 2%, 0) scale(1.07);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-page::before,
+  .tool-page::before,
+  .receiver-page::before {
+    animation: none;
+  }
+}
+
+.home-shell,
+.send-shell,
+.receiver-shell {
+  flex: 1 0 auto;
+}
+
+/* Floating pill nav ---------------------------------------------------------
+   2026 moved away from the edge-to-edge chrome bar: this stays in normal
+   document flow (so it pushes content down like any header) but is sized to
+   its content and centered, so the gradient mesh shows around it rather than
+   behind a full-width strip. Which page you're on is shown by highlighting
+   the matching link (aria-current="page"), not a separate badge chip. */
+.site-header {
+  width: fit-content;
+  max-width: calc(100% - 32px);
+  margin: max(14px, env(safe-area-inset-top)) auto 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 6px 18px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+  box-shadow: var(--glass-shadow);
+  position: sticky;
+  top: max(14px, env(safe-area-inset-top));
+  z-index: 3;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  /* Wordmark in text, mark in accent: all-accent made the brand read as another
+     eyebrow label, and the accent is budgeted (see the control hierarchy). The
+     pill only carries the short form — the full name is the page <title>, the
+     hero, and the footer credit. */
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+}
+
+/* The mark is inlined in every header (fill: currentColor), so it rides the
+   accent token — and the standalone files keep it with no external request. */
+.brand-logo {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  color: var(--accent);
+}
+
+.pill-links {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-left: 10px;
+  margin-left: 4px;
+  border-left: 1px solid var(--glass-border);
+}
+
+.pill-link {
+  padding: 8px 16px;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+  transition: background 160ms var(--ease-spring), color 140ms ease;
+}
+
+.pill-link:hover {
+  color: var(--text);
+}
+
+/* The one thing the old .mode-badge did, done as a nav state instead of a
+   second chip competing for attention. */
+.pill-link[aria-current="page"] {
+  color: var(--accent-ink);
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+}
+
+/* Theme toggle -------------------------------------------------------------
+   A manual switch on top of the OS preference, persisted client-side. The
+   two icons are both in the DOM; CSS swaps their visibility off data-theme
+   so no JS is needed beyond flipping the attribute and saving the choice. */
+.theme-toggle {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  margin-left: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--muted);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 999px;
+  box-shadow: none;
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  transition: color 140ms ease, border-color 140ms ease, transform 160ms var(--ease-spring);
+}
+.theme-toggle:hover {
+  color: var(--accent);
+  border-color: var(--glass-border);
+  filter: none;
+  box-shadow: none;
+}
+.theme-toggle:active {
+  transform: scale(0.9);
+}
+.theme-toggle svg {
+  width: 16px;
+  height: 16px;
+}
+.theme-toggle .icon-sun {
+  display: none;
+}
+:root[data-theme="light"] .theme-toggle .icon-sun {
+  display: block;
+}
+:root[data-theme="light"] .theme-toggle .icon-moon {
+  display: none;
+}
+
+@media (max-width: 480px) {
+  .pill-link {
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+}
+
+.eyebrow,
+.card-kicker {
+  margin: 0 0 8px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* Homepage: type-first hero + bento -----------------------------------------
+   2026 moved SaaS homepages away from "hero paragraph + two equal cards"
+   toward oversized editorial type paired with an asymmetric bento grid —
+   a couple of large tiles carrying the real choices, ringed by small stat
+   tiles that used to be a wall of paragraph text. */
+.home-shell {
+  width: min(1120px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: clamp(40px, 7vw, 84px) 0 48px;
+}
+
+.hero-type {
+  max-width: 920px;
+  margin-bottom: clamp(36px, 5.5vw, 56px);
+}
+
+.hero-type h1 {
+  margin: 0;
+  color: var(--text);
+  /* Genuinely oversized — the page's one visual statement, with the bento
+     grid immediately beneath doing the explaining. */
+  font-size: clamp(44px, 9vw, 104px);
+  font-weight: 800;
+  line-height: 0.98;
+  letter-spacing: -0.04em;
+  text-align: left;
+}
+
+.hero-accent {
+  background: linear-gradient(100deg, var(--accent), var(--accent-2));
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
+.hero-type .hero-copy {
+  max-width: 620px;
+  margin: 22px 0 0;
+  color: var(--muted);
+  font-size: clamp(15px, 1.6vw, 18px);
+  line-height: 1.65;
+}
+
+/* Bento grid: two large action tiles up top, four compact stat tiles below —
+   the value props used to be a paragraph inside each card; now they're
+   scannable in one glance instead of read. */
+.bento {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-rows: minmax(64px, auto);
+  gap: 14px;
+}
+
+.bento-tile {
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  box-shadow: var(--glass-shadow);
+  transition: transform 220ms var(--ease-spring), box-shadow 220ms ease;
+}
+
+.bento-send,
+.bento-receive {
+  grid-column: span 2;
+  grid-row: span 3;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 26px;
+  padding: clamp(24px, 3.4vw, 40px);
+  border-radius: var(--radius-xl);
+}
+
+.bento-send:hover,
+.bento-receive:hover {
+  transform: translateY(-3px);
+}
+
+.bento-receive {
+  background:
+    linear-gradient(150deg, rgba(var(--accent-rgb), 0.09), transparent 55%),
+    var(--glass-bg);
+}
+
+.bento-tile h2 {
+  max-width: 430px;
+  margin: 0 0 12px;
+  color: var(--text);
+  font-size: clamp(22px, 2.8vw, 32px);
+  font-weight: 800;
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+}
+
+.bento-tile p:not(.card-kicker) {
+  max-width: 480px;
+  margin: 0;
+  color: var(--muted);
+}
+
+/* The stat row: bold number/word first, one line of context under it — a
+   bento signature, and a much faster read than four sentences ever were. */
+.bento-stat {
+  grid-column: span 1;
+  grid-row: span 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  padding: 18px 20px;
+  border-radius: var(--radius-lg);
+}
+
+.bento-stat-value {
+  margin: 0;
+  color: var(--text);
+  font-size: clamp(20px, 2vw, 26px);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.bento-stat-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Send and Receive are symmetric choices, not a primary and a fallback, and
+   two filled slabs would make the home page louder than the tool pages it
+   leads to. Tinted-and-outlined at rest, filled on hover: the solid accent
+   stays reserved for a live action. */
+.action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 22px;
+  width: 100%;
+  min-height: 54px;
+  padding: 0 22px;
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.08);
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-decoration: none;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+}
+
+/* Stroke SVG rather than a text glyph: → and ↓ came from whatever the
+   monospace stack shipped — small, thin, and sitting on the baseline. This
+   one matches the label's weight and centers itself. */
+.action-arrow {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  transition: transform 160ms var(--ease-spring);
+}
+
+.action:hover,
+.action:focus-visible {
+  color: var(--accent-ink);
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  border-color: transparent;
+}
+
+/* Nudge the arrow the way it points, so the two tiles read as opposite
+   directions rather than the same button twice. */
+.bento-send .action:hover .action-arrow,
+.bento-send .action:focus-visible .action-arrow {
+  transform: translateX(4px);
+}
+
+.bento-receive .action:hover .action-arrow,
+.bento-receive .action:focus-visible .action-arrow {
+  transform: translateY(4px);
+}
+
+.action:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .action,
+  .action-arrow,
+  .bento-send,
+  .bento-receive {
+    transition: none;
+  }
+
+  .action:hover .action-arrow,
+  .action:focus-visible .action-arrow {
+    transform: none;
+  }
+
+  .bento-send:hover,
+  .bento-receive:hover {
+    transform: none;
+  }
+}
+
+.privacy-note {
+  margin: 30px 0 0;
+  color: var(--muted-dim);
+  font-size: 11px;
+  text-align: center;
+}
+
+/* Site footer -------------------------------------------------------------
+   Mirrors the header: full-width chrome, muted, one row. The id line carries
+   the version and build hash so a saved standalone file names its vintage. */
+.site-footer {
+  margin-top: 32px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 18px;
+  padding: 16px max(22px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(22px, env(safe-area-inset-left));
+  border-top: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  color: var(--muted-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+/* Name on its own line, version · build · license beneath it — one long line
+   wrapped mid-phrase on phones. */
+.footer-id {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.site-footer a {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.site-footer a:hover,
+.site-footer a:focus-visible {
+  color: var(--accent);
+}
+
+.footer-links {
+  display: flex;
+  gap: 16px;
+}
+
+.footer-links a {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* Senders */
+.send-shell {
+  width: min(1180px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: clamp(28px, 5vw, 56px) 0 40px;
+}
+
+/* Split pane: controls on the left, the live stage on the right — instead of
+   a single centered column that buried the actual payoff (the QR stream)
+   under a full page of settings. The stage stays sticky so it's visible the
+   whole time you're adjusting anything in the left column. */
+.tool-grid {
+  display: grid;
+  grid-template-columns: minmax(300px, 400px) 1fr;
+  gap: 28px;
+  align-items: start;
+}
+
+.tool-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.tool-stage-pane {
+  min-width: 0;
+  position: sticky;
+  top: 100px;
+}
+
+.stage-frame {
+  min-height: 360px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(20px, 3vw, 36px);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl);
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  box-shadow: var(--glass-shadow);
+}
+
+.stage-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  max-width: 280px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.stage-placeholder svg {
+  width: 46px;
+  height: 46px;
+  color: var(--muted-dim);
+}
+
+/* Plain, non-hacky toggle: #stage already uses the real `hidden` attribute
+   (see send/main.ts), so this is a standard attribute selector, not a style
+   string match — the placeholder just disappears once the stage doesn't
+   carry `hidden` any more. */
+#stage:not([hidden]) ~ .stage-placeholder {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .tool-grid {
+    grid-template-columns: 1fr;
+  }
+  .tool-stage-pane {
+    position: static;
+  }
+}
+
+.tool-intro {
+  width: 100%;
+  margin-bottom: 14px;
+}
+
+.tool-intro h1,
+.receiver-heading h1 {
+  margin: 0;
+  color: var(--text);
+  font-size: clamp(30px, 6vw, 46px);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  text-align: left;
+}
+
+.tool-intro > p:last-child {
+  max-width: 600px;
+  margin: 14px 0 0;
+  color: var(--muted);
+}
+
+.status-line {
+  min-height: 20px;
+  max-width: none;
+  text-align: left;
+  font-family: var(--font-mono);
+}
+
+/* The status line is also the idle prompt and the live stream spec line, so a
+   rejection has to look different rather than just reading differently — in
+   muted grey it was easy to miss entirely sitting directly above the picker
+   you had just used. */
+.status-line.error {
+  padding: 10px 12px;
+  color: var(--red);
+  background: rgba(255, 122, 114, 0.1);
+  border-left: 3px solid var(--red);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  font-weight: 700;
+}
+
+/* Scoped to .tool-controls (both send and receive share it) rather than
+   .send-shell alone — the receive page's settings panel was missing this
+   override entirely and fell back to details.settings' own min(92vw, 640px),
+   which overflowed the ~300-400px control column and got visually clipped by
+   the stage pane painted after it. */
+.tool-controls .status-line,
+.tool-controls .file-picker,
+.tool-controls details.settings,
+.mode-picker,
+.note-composer {
+  width: 100%;
+}
+
+.demo-picker {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  color: var(--accent);
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.demo-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.demo-buttons button {
+  width: auto;
+  padding: 10px 16px;
+  color: var(--text);
+  background: transparent;
+  box-shadow: none;
+  border: 1px solid var(--line-bright);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.demo-buttons button:hover {
+  border-color: var(--accent);
+  filter: none;
+  box-shadow: none;
+}
+
+/* Segmented file/text switch — real radios, so keyboard and AT come free. */
+.mode-picker {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+}
+
+.mode-picker label {
+  flex: 1;
+}
+
+.mode-picker input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.mode-picker span {
+  display: block;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: center;
+  cursor: pointer;
+  transition: background 160ms var(--ease-spring), color 120ms ease, box-shadow 120ms ease;
+}
+
+.mode-picker span:hover {
+  color: var(--text);
+}
+
+/* Raised, not filled. A filled segment reads as "press me"; this has to read
+   as "you are here", which is why it borrows the glass surface rather than
+   the accent. */
+.mode-picker input:checked + span {
+  color: var(--accent);
+  background: var(--glass-bg-strong);
+  box-shadow: inset 0 0 0 1px var(--glass-border);
+}
+
+.mode-picker input:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.send-shell .stage {
+  max-width: 100%;
+  overflow: hidden;
+  scroll-margin-top: 16px;
+}
+
+.note-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.note-composer textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 168px;
+  padding: 16px;
+  color: var(--text);
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  outline: none;
+  font: 16px/1.55 var(--font-sans);
+  text-transform: none;
+}
+
+.note-composer textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.16);
+}
+
+.footer-hint {
+  margin-top: 6px;
+}
+
+/* Same measure, padding and rhythm as .send-shell — the two tool pages are a
+   pair built from the same .tool-grid split, and any difference between them
+   just reads as a mistake. */
+.receiver-shell {
+  width: min(1180px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: clamp(28px, 5vw, 56px) 0 max(40px, env(safe-area-inset-bottom));
+}
+
+.receiver-heading {
+  margin-bottom: 14px;
+}
+
+.receiver-heading .eyebrow {
+  margin-bottom: 4px;
+}
+
+/* Carries camera specs, live errors and the final throughput. */
+.receiver-heading .status-line {
+  max-width: 480px;
+  margin: 14px 0 0;
+  text-align: left;
+  line-height: 1.4;
+}
+
+.tool-stage-pane #result {
+  width: 100%;
+  margin-top: 14px;
+}
+
+/* The camera stage is a fixed frame — placeholder, live preview and the Start
+   button all occupy the same box, layered rather than swapped in and out of
+   flow, so the right column never jumps height between states. */
+.receiver-stage-frame {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  padding: 0;
+  overflow: hidden;
+}
+
+.receiver-stage-frame .stage-placeholder {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  max-width: 300px;
+  margin: 0 auto;
+  padding: 24px;
+  justify-content: center;
+}
+
+.receiver-stage-frame .stage-placeholder button {
+  width: auto;
+  min-width: 200px;
+}
+
+/* #preview starts at display:none (see receive/main.ts) and, once shown,
+   paints over the placeholder underneath it — no JS beyond that one existing
+   toggle is needed to swap between the two states. */
+#preview {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  background: var(--viewport-bg);
+}
+
+.preview video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 0;
+}
+
+.transfer-hud {
+  position: absolute;
+  inset: auto 0 0;
+  z-index: 2;
+  padding: 54px 14px 14px;
+  background: linear-gradient(transparent, rgba(var(--bg-rgb), 0.94) 55%);
+  pointer-events: none;
+}
+
+.transfer-hud .progress-status,
+.transfer-hud .progress {
+  width: 100%;
+}
+
+.transfer-hud .progress-status {
+  margin-bottom: 7px;
+  color: var(--text-dim);
+  text-shadow: 0 1px 3px #000;
+}
+
+.transfer-hud .progress {
+  height: 12px;
+  background: rgba(var(--bg-rgb), 0.6);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.diagnostics {
+  margin-top: 2px;
+}
+
+.diagnostics .metrics {
+  width: 100%;
+  padding-top: 10px;
+}
+
+#result:empty {
+  display: none;
+}
+
+#result {
+  width: 100%;
+}
+
+.received-note {
+  width: 100%;
+  max-width: 640px;
+  margin: 0;
+  padding: 16px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+}
+
+/* Shown when the camera has run for a while without decoding anything. Both
+   of the fixes that matter are on the sender, so this has to be readable at a
+   glance from across a room. */
+.no-signal {
+  width: 100%;
+  max-width: 640px;
+  padding: 16px 18px;
+  color: var(--muted);
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  border: 1px solid var(--glass-border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.no-signal strong {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--accent);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.no-signal ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.no-signal li + li {
+  margin-top: 6px;
+}
+
+.no-signal-dismiss {
+  margin-top: 12px;
+}
+
+.secondary-button {
+  width: auto;
+  padding: 10px 16px;
+  color: var(--text);
+  background: transparent;
+  box-shadow: none;
+  border: 1px solid var(--line-bright);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.secondary-button:hover {
+  filter: none;
+  box-shadow: none;
+  border-color: var(--accent);
+}
+
+.note-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  margin-top: 14px;
+  max-width: 100%;
+}
+
+.text-button {
+  padding: 0;
+  color: var(--accent);
+  background: transparent;
+  box-shadow: none;
+  border: 0;
+  border-radius: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.text-button:hover {
+  filter: none;
+  box-shadow: none;
+}
+
+.text-button.danger {
+  color: var(--red);
+}
+
+@media (max-width: 680px) {
+  .site-header {
+    padding: 5px 6px 5px 14px;
+  }
+  .brand {
+    gap: 6px;
+    font-size: 12px;
+  }
+  .brand-logo {
+    width: 19px;
+    height: 19px;
+  }
+  .home-shell {
+    width: min(100% - 28px, 560px);
+    padding-top: 30px;
+  }
+  .hero-type h1 {
+    font-size: clamp(34px, 12vw, 48px);
+  }
+  .hero-type .hero-copy {
+    margin-top: 16px;
+  }
+  /* The two big tiles stack full-width; the four stat tiles fall back to a
+     2×2 grid underneath them rather than a single thin column. */
+  .bento {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .bento-send,
+  .bento-receive {
+    grid-column: span 2;
+    grid-row: auto;
+    min-height: 0;
+    gap: 16px;
+    padding: 18px 15px;
+    border-radius: var(--radius-lg);
+  }
+  .bento-stat {
+    grid-column: span 1;
+    grid-row: auto;
+    padding: 14px 16px;
+    border-radius: var(--radius-md);
+  }
+  .bento-tile .card-kicker {
+    margin-bottom: 6px;
+    font-size: 9px;
+    letter-spacing: 0.1em;
+  }
+  .bento-tile h2 {
+    margin-bottom: 8px;
+    font-size: clamp(17px, 5vw, 24px);
+  }
+  /* The two tiles stay full width on a phone, but the body copy still reads
+     worse than nothing at this measure — the kicker and heading already say
+     which side you are on, which is the only decision this screen asks for. */
+  .bento-tile p:not(.card-kicker) {
+    display: none;
+  }
+  .card-actions .action {
+    min-width: 0;
+    width: 100%;
+    gap: 8px;
+    padding: 10px 12px;
+    font-size: 13px;
+  }
+  .action-arrow {
+    width: 18px;
+    height: 18px;
+  }
+  .send-shell {
+    width: calc(100% - 24px);
+    padding-top: 28px;
+  }
+  .tool-grid {
+    gap: 20px;
+  }
+  .stage-frame {
+    min-height: 240px;
+    padding: 18px;
+  }
+  .stage-placeholder svg {
+    width: 36px;
+    height: 36px;
+  }
+  .receiver-shell {
+    width: calc(100% - 20px);
+    padding-top: 10px;
+  }
+  .receiver-heading {
+    gap: 10px;
+  }
+  .receiver-heading h1 {
+    font-size: 26px;
+  }
+  .receiver-heading .status-line {
+    font-size: 10px;
+  }
+  .progress-status {
+    font-size: 11px;
+  }
+  .transfer-hud {
+    padding: 42px 10px 10px;
+  }
+}
+
+@media (max-height: 620px) and (orientation: landscape) {
+  .receiver-heading .eyebrow {
+    display: none;
+  }
+  .receiver-heading h1 {
+    font-size: 20px;
+  }
+  .receiver-stage-frame {
+    aspect-ratio: auto;
+    height: calc(100dvh - 108px);
+  }
+}
