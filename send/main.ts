@@ -284,13 +284,23 @@ async function startStream(revealStage = false) {
   const sizeCanvas = () => {
     const dpr = window.devicePixelRatio || 1;
     const total = modules + 2 * MARGIN;
-    const containerWidth = stage.parentElement?.getBoundingClientRect().width ?? window.innerWidth;
-    const stageStyle = getComputedStyle(stage);
-    const horizontalChrome =
-      Number.parseFloat(stageStyle.paddingLeft) +
-      Number.parseFloat(stageStyle.paddingRight) +
-      Number.parseFloat(stageStyle.borderLeftWidth) +
-      Number.parseFloat(stageStyle.borderRightWidth);
+    const container = stage.parentElement;
+    const containerWidth = container?.getBoundingClientRect().width ?? window.innerWidth;
+    // Chrome eaten by every box between the canvas and that container's own
+    // edge, not just .stage's — .stage now sits inside .stage-frame, which
+    // carries its own padding/border for the glass panel. Reading only
+    // .stage's chrome under-subtracted by .stage-frame's padding on both
+    // sides, which is exactly the width the QR box then overflowed into.
+    const boxChrome = (el: Element) => {
+      const style = getComputedStyle(el);
+      return (
+        Number.parseFloat(style.paddingLeft) +
+        Number.parseFloat(style.paddingRight) +
+        Number.parseFloat(style.borderLeftWidth) +
+        Number.parseFloat(style.borderRightWidth)
+      );
+    };
+    const horizontalChrome = boxChrome(stage) + (container ? boxChrome(container) : 0);
     const cssBudget = fitQrDisplaySize(
       window.innerWidth,
       window.innerHeight,
