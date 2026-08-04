@@ -49,9 +49,11 @@ Roughly in priority order:
    the sender now targets. The send side has had one round of real-device
    testing and fixes; receive hasn't yet been confirmed working end-to-end
    on physical hardware.
-2. **Settings UI** — tx fps / bytes-per-frame / error correction on the
-   sender, capture width / fps / decode workers on the receiver (currently
-   hardcoded to conservative defaults — see `SendScreen.kt`'s `TX_FPS`).
+2. **Settings UI** — the sender now has tx fps / bytes-per-frame chips
+   (`SendScreen.kt`, same option lists as the web app's
+   `shared/send-settings.ts`); still missing: error correction level on the
+   sender, and capture width / fps / decode workers on the receiver
+   (currently hardcoded).
 3. **Real theming polish** — a working manual light/dark toggle (currently
    just follows the OS setting) and the glass/blur treatment from
    `Modifier.blur()` / `RenderEffect` on API 31+, per the design notes this
