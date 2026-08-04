@@ -13,13 +13,17 @@ wire format as the web app in `../send`, `../receive` and `../shared`.
   sender/receiver — see the file header comments in `Fountain.kt` for why
   that matters (deterministic cross-platform math).
 - **`:app`** — Compose UI (Home, Send, Receive), CameraX + ML Kit for
-  decoding, `com.google.zxing:core` for encoding. Builds and installs — a
-  real `assembleDebug` APK links successfully — but **has not been run on a
-  device or emulator**. There was no Android SDK, emulator, or physical
-  device available in the environment this was built in, and camera-based QR
-  scanning can't be meaningfully tested on an emulator anyway (no real
-  camera). Treat the UI/camera code as compiled-but-unverified until someone
-  runs it on an actual phone.
+  decoding, `com.google.zxing:core` for encoding. Builds, installs, and has
+  now been exercised on a real device — a first round of testing turned up a
+  main-thread crash on file selection and a few layout issues (status bar
+  overlap, a clipped stat row), all fixed. The sender's default bytes/frame
+  was also backed off from the web app's 2953-byte (QR v40-L) ceiling to
+  1465 (QR v27-L) as a precaution: that ceiling is zero-margin by
+  definition, well-proven in zxing-**wasm** (the web app's decoder) but not
+  yet confirmed at that exact boundary in zxing-**core**'s Java encoder,
+  which this app uses instead. Still genuinely unverified: sustained
+  multi-minute transfers, low-end/low-RAM devices, and the receive side's
+  CameraX/ML Kit path end-to-end on a physical camera.
 
 ## Build
 
@@ -40,9 +44,11 @@ Or just open `android/` in Android Studio — it's a standard Gradle project.
 
 Roughly in priority order:
 
-1. **Run it on a real device** and see what breaks — camera permission
-   flow, CameraX binding on a real sensor, ML Kit decode latency at the
-   frame rate the web sender targets.
+1. **Confirm the receive side on a real device** — camera permission flow,
+   CameraX binding on a real sensor, ML Kit decode latency at the frame rate
+   the sender now targets. The send side has had one round of real-device
+   testing and fixes; receive hasn't yet been confirmed working end-to-end
+   on physical hardware.
 2. **Settings UI** — tx fps / bytes-per-frame / error correction on the
    sender, capture width / fps / decode workers on the receiver (currently
    hardcoded to conservative defaults — see `SendScreen.kt`'s `TX_FPS`).
