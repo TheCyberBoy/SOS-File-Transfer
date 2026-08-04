@@ -7,6 +7,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,9 +19,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -38,6 +45,7 @@ import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import com.novosoftlabs.sosfiletransfer.core.FrameHeader
+import com.novosoftlabs.sosfiletransfer.core.HEADER_LEN
 import com.novosoftlabs.sosfiletransfer.core.LTEncoder
 import com.novosoftlabs.sosfiletransfer.core.MAX_FILE_LABEL
 import com.novosoftlabs.sosfiletransfer.core.fnv1a
@@ -48,49 +56,54 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlin.random.Random
 
-// The web sender defaults to 2953 bytes/frame — the exact byte ceiling of a
-// QR v40-L code, zero margin. That's fine for zxing-wasm (battle-tested at
-// that exact boundary), but zxing-core's Java encoder hasn't been verified
-// there and a boundary condition (mode/terminator bit accounting right at
-// max capacity) is a very plausible source of an encode-time crash. Use the
-// same safer fallback the web app's own README recommends when the max
-// setting misbehaves — real margin below any version's ceiling — instead of
-// chasing the untested boundary.
-private const val FRAME_BYTES = 1465 // QR v27-L, comfortable margin below capacity
-private const val BLOCK_LEN = FRAME_BYTES - com.novosoftlabs.sosfiletransfer.core.HEADER_LEN
-private const val TX_FPS = 20L // conservative default for a first pass; web defaults to 60
+// Same option lists as shared/send-settings.ts on the web side, so the two
+// sender UIs offer identical tuning. 2953 (QR v40-L, zero margin) is kept
+// as an option since it's the web app's own default and works fine in
+// zxing-wasm — just not the *Android default*, since that exact boundary
+// hasn't been confirmed against zxing-core's Java encoder yet.
+private val FRAME_BYTES_OPTIONS = listOf(500, 1000, 1465, 1850, 2331, 2953)
+private val TX_FPS_OPTIONS = listOf(10, 15, 20, 24, 30, 60)
+private const val DEFAULT_FRAME_BYTES = 1465 // QR v27-L, comfortable margin below capacity
+private const val DEFAULT_TX_FPS = 20
 
 private sealed interface SendPhase {
     data object Idle : SendPhase
     data object Preparing : SendPhase
-    data class Streaming(val fileName: String, val status: String, val encoder: LTEncoder, val header: FrameHeader) : SendPhase
+    data class Streaming(val fileName: String, val compression: String, val encoder: LTEncoder, val header: FrameHeader) : SendPhase
     data class Failed(val message: String) : SendPhase
 }
 
+private data class PickedFile(val name: String, val type: String, val bytes: ByteArray)
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SendScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     var phase by remember { mutableStateOf<SendPhase>(SendPhase.Idle) }
     var pickedUri by remember { mutableStateOf<Uri?>(null) }
+    var pickedFile by remember { mutableStateOf<PickedFile?>(null) }
     var frameBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var seq by remember { mutableStateOf(0) }
+    var frameBytes by remember { mutableStateOf(DEFAULT_FRAME_BYTES) }
+    var txFps by remember { mutableStateOf(DEFAULT_TX_FPS) }
 
     val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
         phase = SendPhase.Preparing
+        pickedFile = null
         pickedUri = uri
     }
 
-    // All the actual work — file read, gzip, SHA-256, fountain-code block
-    // allocation — happens here, off the main thread. Doing this inline in
-    // the picker callback above is what crashed the app: that callback runs
-    // on the UI thread, and a large-enough file turns a blocking read plus a
-    // few full-size byte-array copies into either a frozen UI or an
-    // OutOfMemoryError that a plain `catch (e: Exception)` never sees.
+    // The file read — off the main thread. Doing this inline in the picker
+    // callback above is what originally crashed the app: that callback runs
+    // on the UI thread, and a large-enough file turns a blocking read into
+    // a frozen UI or an OutOfMemoryError a plain `catch (e: Exception)`
+    // never sees. Kept separate from encoding below so changing a setting
+    // (bytes/frame) doesn't require re-reading the file from disk.
     LaunchedEffect(pickedUri) {
         val uri = pickedUri ?: return@LaunchedEffect
         try {
-            val (name, type, bytes) = withContext(Dispatchers.IO) {
+            pickedFile = withContext(Dispatchers.IO) {
                 val resolver = context.contentResolver
                 val readBytes = resolver.openInputStream(uri)?.use { it.readBytes() }
                     ?: throw IllegalStateException("Could not read the selected file.")
@@ -98,34 +111,50 @@ fun SendScreen(onBack: () -> Unit) {
                 val mimeType = resolver.getType(uri)
                     ?: MimeTypeMap.getSingleton().getMimeTypeFromExtension(displayName.substringAfterLast('.', ""))
                     ?: "application/octet-stream"
-                Triple(displayName, mimeType, readBytes)
+                PickedFile(displayName, mimeType, readBytes)
             }
+        } catch (e: OutOfMemoryError) {
+            android.util.Log.e("SendScreen", "OOM reading file", e)
+            phase = SendPhase.Failed("That file is too large for this device to prepare right now — try a smaller one.")
+        } catch (e: Throwable) {
+            android.util.Log.e("SendScreen", "Failed to read file for sending", e)
+            phase = SendPhase.Failed(e.message ?: "Could not read that file.")
+        }
+    }
 
-            val (encoder, header, statusLine) = withContext(Dispatchers.Default) {
-                val packed = packFile(name, type, bytes)
+    // Fountain-encodes the picked file into blocks sized for the current
+    // frameBytes setting. Keyed on both, so changing bytes/frame while a
+    // file is already picked re-encodes with the new block size instead of
+    // requiring a fresh pick — the same "changing a setting restarts the
+    // stream" behavior the web sender has.
+    LaunchedEffect(pickedFile, frameBytes) {
+        val file = pickedFile ?: return@LaunchedEffect
+        val blockLen = frameBytes - HEADER_LEN
+        try {
+            val (encoder, header, compression) = withContext(Dispatchers.Default) {
+                val packed = packFile(file.name, file.type, file.bytes)
                 val sessionId = Random.nextInt(1, 0xffff)
-                val enc = LTEncoder(packed.container, BLOCK_LEN, sessionId)
+                val enc = LTEncoder(packed.container, blockLen, sessionId)
                 val hdr = FrameHeader(
                     sessionId = sessionId,
                     seq = 0,
                     k = enc.k,
-                    blockLen = BLOCK_LEN,
+                    blockLen = blockLen,
                     totalLen = packed.container.size,
                     payloadFnv = fnv1a(packed.container),
                 )
-                val status = "$TX_FPS FPS · $FRAME_BYTES bytes/frame · ${packed.compression} · K=${enc.k}"
-                Triple(enc, hdr, status)
+                Triple(enc, hdr, packed.compression.name)
             }
 
             seq = 0
             frameBitmap = null
-            phase = SendPhase.Streaming(name, statusLine, encoder, header)
+            phase = SendPhase.Streaming(file.name, compression, encoder, header)
         } catch (e: OutOfMemoryError) {
-            android.util.Log.e("SendScreen", "OOM preparing file", e)
+            android.util.Log.e("SendScreen", "OOM encoding file", e)
             phase = SendPhase.Failed("That file is too large for this device to prepare right now — try a smaller one.")
         } catch (e: Throwable) {
             // Throwable, not Exception — a library-internal Error (e.g. from
-            // zxing/ML Kit's native bits) must never take the whole app down
+            // zxing's native bits) must never take the whole app down
             // silently. Logged so `adb logcat` shows the real cause instead
             // of just a generic message on screen.
             android.util.Log.e("SendScreen", "Failed to prepare file for sending", e)
@@ -136,7 +165,9 @@ fun SendScreen(onBack: () -> Unit) {
     // Drives the animated QR stream once a file is selected — regenerates a
     // new frame every tick, same idea as the web sender's rAF loop, just on a
     // fixed-rate coroutine delay instead. Wrapped in try/catch so a bad frame
-    // shows an error instead of taking the whole app down with it.
+    // shows an error instead of taking the whole app down with it. txFps is
+    // read fresh every loop iteration, so adjusting it mid-stream takes
+    // effect on the next tick without restarting the coroutine.
     LaunchedEffect(phase) {
         val streaming = phase as? SendPhase.Streaming ?: return@LaunchedEffect
         while (true) {
@@ -150,7 +181,7 @@ fun SendScreen(onBack: () -> Unit) {
                 phase = SendPhase.Failed(e.message ?: "The stream stopped unexpectedly.")
                 return@LaunchedEffect
             }
-            delay(1000L / TX_FPS)
+            delay(1000L / txFps)
         }
     }
 
@@ -159,6 +190,7 @@ fun SendScreen(onBack: () -> Unit) {
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .windowInsetsPadding(WindowInsets.safeDrawing)
+            .verticalScroll(rememberScrollState())
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
@@ -167,7 +199,7 @@ fun SendScreen(onBack: () -> Unit) {
         val statusText = when (val p = phase) {
             is SendPhase.Idle -> "Choose a file to begin"
             is SendPhase.Preparing -> "Preparing…"
-            is SendPhase.Streaming -> p.status
+            is SendPhase.Streaming -> "$txFps FPS · $frameBytes bytes/frame · ${p.compression} · K=${p.header.k}"
             is SendPhase.Failed -> p.message
         }
         Text(
@@ -205,6 +237,38 @@ fun SendScreen(onBack: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(24.dp),
                 )
+            }
+        }
+
+        // Settings — bytes/frame changes re-encode the current file at the
+        // new block size (see the LaunchedEffect(pickedFile, frameBytes)
+        // above); tx fps just changes the delay between frames and applies
+        // on the very next tick without interrupting the stream.
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Bytes per frame", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(FRAME_BYTES_OPTIONS) { option ->
+                    FilterChip(
+                        selected = option == frameBytes,
+                        onClick = { frameBytes = option },
+                        label = { Text(option.toString()) },
+                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primary),
+                    )
+                }
+            }
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("TX frames per second", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(TX_FPS_OPTIONS) { option ->
+                    FilterChip(
+                        selected = option == txFps,
+                        onClick = { txFps = option },
+                        label = { Text(option.toString()) },
+                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primary),
+                    )
+                }
             }
         }
     }
