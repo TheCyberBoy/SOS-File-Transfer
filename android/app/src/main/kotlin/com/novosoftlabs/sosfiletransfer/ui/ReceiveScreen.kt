@@ -1,11 +1,14 @@
 package com.novosoftlabs.sosfiletransfer.ui
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.ContentValues
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.hardware.camera2.CaptureRequest
+import android.net.Uri
 import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -100,6 +103,8 @@ private data class ReceiveState(
     val done: Boolean = false,
     val resultText: String? = null,
     val savedName: String? = null,
+    val savedUri: Uri? = null,
+    val savedMimeType: String? = null,
     val previewBitmap: Bitmap? = null,
     val error: String? = null,
 )
@@ -109,7 +114,7 @@ private data class ReceiveState(
  *  then applied to [ReceiveState] once back on the composition's dispatcher. */
 private sealed interface FinishResult {
     data class Snippet(val text: String) : FinishResult
-    data class SavedFile(val name: String, val previewBitmap: Bitmap?) : FinishResult
+    data class SavedFile(val name: String, val uri: Uri, val mimeType: String, val previewBitmap: Bitmap?) : FinishResult
     data class Error(val message: String) : FinishResult
 }
 
@@ -135,8 +140,8 @@ private suspend fun finishReceivedTransfer(context: android.content.Context, pay
                 } else {
                     null
                 }
-                val saved = withContext(Dispatchers.IO) { saveToDownloads(context, file.name, file.type, file.bytes) }
-                FinishResult.SavedFile(saved, preview)
+                val savedUri = withContext(Dispatchers.IO) { saveToDownloads(context, file.name, file.type, file.bytes) }
+                FinishResult.SavedFile(file.name, savedUri, file.type, preview)
             }
         } catch (e: Throwable) {
             android.util.Log.e("ReceiveScreen", "Failed to unpack/save received file", e)
@@ -243,6 +248,8 @@ fun ReceiveScreen(onBack: () -> Unit) {
                             is FinishResult.SavedFile -> state = state.copy(
                                 status = "Done",
                                 savedName = result.name,
+                                savedUri = result.uri,
+                                savedMimeType = result.mimeType,
                                 previewBitmap = result.previewBitmap,
                                 progressLabel = "100% · file recovered",
                             )
@@ -312,6 +319,14 @@ fun ReceiveScreen(onBack: () -> Unit) {
                     .fillMaxWidth()
                     .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp)),
             )
+        }
+        if (state.savedUri != null) {
+            Button(onClick = {
+                val opened = openReceivedFile(context, state.savedUri!!, state.savedMimeType)
+                if (!opened) state = state.copy(error = "No app on this device can open that file type.")
+            }) {
+                Text("Open ${state.savedName}")
+            }
         }
     }
 }
@@ -435,10 +450,29 @@ private fun FocusRing(offset: Offset, onFinished: () -> Unit) {
     )
 }
 
+/** Hands the saved file to whatever app the OS considers the right viewer
+ *  for its media type — a video player, image viewer, PDF reader, etc.
+ *  Saving to Downloads alone (the previous behavior) left the user with
+ *  nothing but a filename on screen for anything that wasn't an image; this
+ *  is the same "tap to open" a received file gets in any messaging app. */
+private fun openReceivedFile(context: android.content.Context, uri: Uri, mimeType: String?): Boolean {
+    val intent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(uri, mimeType ?: "*/*")
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    return try {
+        context.startActivity(intent)
+        true
+    } catch (e: ActivityNotFoundException) {
+        android.util.Log.e("ReceiveScreen", "No app can open $mimeType", e)
+        false
+    }
+}
+
 /** Saves a received file into the public Downloads collection via
  *  MediaStore — the Android equivalent of the web receiver's `download`
  *  attribute, without needing broad storage permissions on API 29+. */
-private fun saveToDownloads(context: android.content.Context, name: String, mimeType: String, bytes: ByteArray): String {
+private fun saveToDownloads(context: android.content.Context, name: String, mimeType: String, bytes: ByteArray): Uri {
     val resolver = context.contentResolver
     val values = ContentValues().apply {
         put(MediaStore.Downloads.DISPLAY_NAME, name)
@@ -451,5 +485,5 @@ private fun saveToDownloads(context: android.content.Context, name: String, mime
     values.clear()
     values.put(MediaStore.Downloads.IS_PENDING, 0)
     resolver.update(uri, values, null, null)
-    return name
+    return uri
 }
