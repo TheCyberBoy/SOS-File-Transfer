@@ -17,6 +17,7 @@ import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -52,13 +53,21 @@ import com.novosoftlabs.sosfiletransfer.core.snippetText
 import com.novosoftlabs.sosfiletransfer.core.streamIdentity
 import com.novosoftlabs.sosfiletransfer.core.unpackFile
 import com.novosoftlabs.sosfiletransfer.core.verifyFile
+import com.novosoftlabs.sosfiletransfer.transfer.TransferProgressEstimate
+import com.novosoftlabs.sosfiletransfer.transfer.estimateTransferProgress
+import com.novosoftlabs.sosfiletransfer.transfer.formatDuration
+import com.novosoftlabs.sosfiletransfer.transfer.goodputKbs
+import java.util.Locale
 import java.util.concurrent.Executors
 
 private data class ReceiveState(
     val status: String = "Ready to scan a file or text stream",
     val decoder: LTDecoder? = null,
     val streamKey: String = "",
+    val startTs: Long = 0L,
     val progress: Float = 0f,
+    val progressLabel: String = "",
+    val etaLabel: String = "",
     val done: Boolean = false,
     val resultText: String? = null,
     val savedName: String? = null,
@@ -93,19 +102,56 @@ fun ReceiveScreen(onBack: () -> Unit) {
                 current = current.copy(
                     decoder = LTDecoder(parsed.header.k, parsed.header.blockLen, parsed.header.sessionId, parsed.header.totalLen),
                     streamKey = identity,
+                    startTs = System.nanoTime(),
+                    status = "Receiving…",
                 )
             }
             val decoder = current.decoder!!
             decoder.addFrame(parsed.header.seq, parsed.block)
-            val progress = decoder.solvedCount.toFloat() / decoder.k.toFloat()
+
+            val elapsedSeconds = maxOf(0.0, (System.nanoTime() - current.startTs) / 1_000_000_000.0)
+            val estimate = estimateTransferProgress(decoder.k, decoder.framesNew, elapsedSeconds, decoder.solvedCount)
+            val percent = estimate.fraction * 100
+            val shownPercent = if (percent < 10) {
+                String.format(Locale.US, "%.1f", percent)
+            } else {
+                String.format(Locale.US, "%.0f", percent)
+            }
+            // Held back for the first few frames — a two-frame sample reads wildly wrong.
+            val rate = if (decoder.framesNew >= 4) {
+                val kbs = goodputKbs(decoder.framesNew, decoder.blockLen, decoder.k, elapsedSeconds)
+                " · ${String.format(Locale.US, "%.1f", kbs)} KB/s"
+            } else {
+                ""
+            }
+            val etaLabel = (
+                if (estimate.etaSeconds == null) {
+                    if (estimate.phase == TransferProgressEstimate.Phase.DECODING) {
+                        "${decoder.framesNew} frames · decoding"
+                    } else {
+                        "Estimating time…"
+                    }
+                } else {
+                    "About ${formatDuration(estimate.etaSeconds)} · ${decoder.framesNew} frames"
+                }
+                ) + rate
+
             current = current.copy(
-                progress = progress,
-                status = "${decoder.solvedCount}/${decoder.k} blocks · ${decoder.framesNew} frames",
+                progress = estimate.fraction.toFloat(),
+                progressLabel = "$shownPercent% · ${decoder.solvedCount}/${decoder.k} blocks",
+                etaLabel = etaLabel,
             )
 
             if (decoder.isComplete) {
                 val payload = decoder.assemble()!!
+                val seconds = maxOf(0.0, (System.nanoTime() - current.startTs) / 1_000_000_000.0)
                 val ok = fnv1a(payload) == parsed.header.payloadFnv
+                current = current.copy(
+                    status = "Done",
+                    progress = 1f,
+                    progressLabel = if (ok) "100% · file recovered" else "100%",
+                    etaLabel = "${formatDuration(seconds)} total",
+                )
                 current = if (!ok) {
                     current.copy(done = true, error = "The optical stream checksum did not match.")
                 } else {
@@ -113,7 +159,7 @@ fun ReceiveScreen(onBack: () -> Unit) {
                         val file = unpackFile(payload)
                         if (!verifyFile(file)) throw IllegalStateException("SHA-256 verification failed.")
                         if (isSnippet(file)) {
-                            current.copy(done = true, resultText = snippetText(file))
+                            current.copy(done = true, resultText = snippetText(file), progressLabel = "100% · text recovered")
                         } else {
                             val saved = saveToDownloads(context, file.name, file.type, file.bytes)
                             current.copy(done = true, savedName = saved)
@@ -144,7 +190,22 @@ fun ReceiveScreen(onBack: () -> Unit) {
 
         if (hasPermission) {
             CameraPreview(onFrame = ::onFrameDecoded)
-            if (state.decoder != null && !state.done) {
+            if (state.decoder != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        state.progressLabel,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        state.etaLabel,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 LinearProgressIndicator(progress = { state.progress }, modifier = Modifier.fillMaxWidth())
             }
         } else {
