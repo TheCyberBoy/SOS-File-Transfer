@@ -391,13 +391,21 @@ private fun CameraPreview(onFrame: (ByteArray) -> Unit) {
                     // Without an explicit target, CameraX picks a default
                     // ImageAnalysis resolution per-device — on some sensors
                     // that's well above what a QR scan needs, and ML Kit's
-                    // per-frame cost scales with pixel count. 1280x720 is
-                    // comfortably enough detail to read a dense QR code at
-                    // arm's length while keeping decode latency low and
-                    // predictable across devices.
+                    // per-frame cost scales with pixel count, so this is
+                    // still capped rather than left uncapped. 1280x720 was
+                    // enough for a single QR code filling most of the
+                    // frame, but the sender can now show a grid of several
+                    // — with 4 codes in a 2x2 grid, each one only gets
+                    // roughly a quarter of that pixel budget, which was
+                    // dropping their effective module size below what ML
+                    // Kit could reliably resolve. 1920x1080 gives each code
+                    // in a grid room to stay sharp; the receiver has no way
+                    // to know the sender's codes-per-frame setting (this is
+                    // a one-way link), so this has to cover the multi-code
+                    // case unconditionally rather than sizing to it.
                     val resolutionSelector = ResolutionSelector.Builder()
                         .setResolutionStrategy(
-                            ResolutionStrategy(Size(1280, 720), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER),
+                            ResolutionStrategy(Size(1920, 1080), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER),
                         )
                         .build()
                     val analysis = ImageAnalysis.Builder()
