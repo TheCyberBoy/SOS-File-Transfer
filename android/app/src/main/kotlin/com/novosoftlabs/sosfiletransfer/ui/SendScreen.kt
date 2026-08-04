@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -51,10 +52,12 @@ import com.novosoftlabs.sosfiletransfer.core.MAX_FILE_LABEL
 import com.novosoftlabs.sosfiletransfer.core.fnv1a
 import com.novosoftlabs.sosfiletransfer.core.packFile
 import com.novosoftlabs.sosfiletransfer.core.packFrame
+import kotlin.math.ceil
+import kotlin.math.sqrt
+import kotlin.random.Random
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import kotlin.random.Random
 
 // Same option lists as shared/send-settings.ts on the web side, so the two
 // sender UIs offer identical tuning. 2953 (QR v40-L, zero margin) is kept
@@ -72,6 +75,21 @@ private const val DEFAULT_FRAME_BYTES = 1465 // QR v27-L, comfortable margin bel
 // restriction and ReceiveScreen's resolution cap for the actual speed fix.
 private const val DEFAULT_TX_FPS = 24
 
+// Showing more than one independent QR code per tick is a near-free
+// throughput multiplier: a phone screen has far more pixel budget than one
+// QR code uses, ML Kit's process() already returns every code it finds in
+// a frame (not just one — see QrFrameAnalyzer), and each code is still just
+// a standalone fountain frame, so this needs no protocol change at all.
+// Same "visual MIMO" idea as the screen-camera VLC literature (COBRA,
+// RDCode) and the QR-grid technique used for bulk document capture — just
+// applied to this pipeline. 4 is a conservative default: more codes means
+// each one is physically smaller on screen, which trades off against
+// decode reliability at typical hand-held distance (the same scalability
+// concern the "Strata" screen-camera paper is built around), so it's a
+// tunable setting rather than a fixed maximum.
+private val CODES_PER_FRAME_OPTIONS = listOf(1, 2, 4, 6, 9)
+private const val DEFAULT_CODES_PER_FRAME = 4
+
 private sealed interface SendPhase {
     data object Idle : SendPhase
     data object Preparing : SendPhase
@@ -88,10 +106,11 @@ fun SendScreen(onBack: () -> Unit) {
     var phase by remember { mutableStateOf<SendPhase>(SendPhase.Idle) }
     var pickedUri by remember { mutableStateOf<Uri?>(null) }
     var pickedFile by remember { mutableStateOf<PickedFile?>(null) }
-    var frameBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var frameBitmaps by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
     var seq by remember { mutableStateOf(0) }
     var frameBytes by remember { mutableStateOf(DEFAULT_FRAME_BYTES) }
     var txFps by remember { mutableStateOf(DEFAULT_TX_FPS) }
+    var codesPerFrame by remember { mutableStateOf(DEFAULT_CODES_PER_FRAME) }
 
     val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -153,7 +172,7 @@ fun SendScreen(onBack: () -> Unit) {
             }
 
             seq = 0
-            frameBitmap = null
+            frameBitmaps = emptyList()
             phase = SendPhase.Streaming(file.name, compression, encoder, header)
         } catch (e: OutOfMemoryError) {
             android.util.Log.e("SendScreen", "OOM encoding file", e)
@@ -169,19 +188,27 @@ fun SendScreen(onBack: () -> Unit) {
     }
 
     // Drives the animated QR stream once a file is selected — regenerates a
-    // new frame every tick, same idea as the web sender's rAF loop, just on a
-    // fixed-rate coroutine delay instead. Wrapped in try/catch so a bad frame
-    // shows an error instead of taking the whole app down with it. txFps is
-    // read fresh every loop iteration, so adjusting it mid-stream takes
-    // effect on the next tick without restarting the coroutine.
+    // grid of frames every tick, same idea as the web sender's rAF loop,
+    // just on a fixed-rate coroutine delay instead. Wrapped in try/catch so
+    // a bad frame shows an error instead of taking the whole app down with
+    // it. txFps and codesPerFrame are read fresh every loop iteration, so
+    // adjusting either mid-stream takes effect on the next tick without
+    // restarting the coroutine.
     LaunchedEffect(phase) {
         val streaming = phase as? SendPhase.Streaming ?: return@LaunchedEffect
         while (true) {
             try {
-                val block = streaming.encoder.encode(seq)
-                val frame = packFrame(streaming.header.copy(seq = seq), block)
-                frameBitmap = withContext(Dispatchers.Default) { renderQrBitmap(frame) }
-                seq++
+                val n = codesPerFrame.coerceAtLeast(1)
+                val baseSeq = seq
+                frameBitmaps = withContext(Dispatchers.Default) {
+                    (0 until n).map { i ->
+                        val frameSeq = baseSeq + i
+                        val block = streaming.encoder.encode(frameSeq)
+                        val frame = packFrame(streaming.header.copy(seq = frameSeq), block)
+                        renderQrBitmap(frame)
+                    }
+                }
+                seq = baseSeq + n
             } catch (e: Throwable) {
                 android.util.Log.e("SendScreen", "Failed to render QR frame $seq", e)
                 phase = SendPhase.Failed(e.message ?: "The stream stopped unexpectedly.")
@@ -205,7 +232,7 @@ fun SendScreen(onBack: () -> Unit) {
         val statusText = when (val p = phase) {
             is SendPhase.Idle -> "Choose a file to begin"
             is SendPhase.Preparing -> "Preparing…"
-            is SendPhase.Streaming -> "$txFps FPS · $frameBytes bytes/frame · ${p.compression} · K=${p.header.k}"
+            is SendPhase.Streaming -> "$txFps FPS × $codesPerFrame codes · $frameBytes bytes/frame · ${p.compression} · K=${p.header.k}"
             is SendPhase.Failed -> p.message
         }
         Text(
@@ -219,37 +246,35 @@ fun SendScreen(onBack: () -> Unit) {
             Text(label ?: "Choose file (up to $MAX_FILE_LABEL)")
         }
 
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f)
-                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp)),
-            contentAlignment = Alignment.Center,
-        ) {
-            when {
-                phase is SendPhase.Preparing -> CircularProgressIndicator()
-                frameBitmap != null -> Image(
-                    bitmap = frameBitmap!!.asImageBitmap(),
-                    contentDescription = "Animated QR code carrying the file",
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(1f)
-                        .background(androidx.compose.ui.graphics.Color.White, RoundedCornerShape(16.dp))
-                        .padding(16.dp),
-                )
-                else -> Text(
-                    "Your animated code will appear here",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(24.dp),
-                )
+        if (frameBitmaps.isNotEmpty()) {
+            QrGrid(frameBitmaps, modifier = Modifier.fillMaxWidth())
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1f)
+                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (phase is SendPhase.Preparing) {
+                    CircularProgressIndicator()
+                } else {
+                    Text(
+                        "Your animated code will appear here",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(24.dp),
+                    )
+                }
             }
         }
 
-        // Settings — bytes/frame changes re-encode the current file at the
-        // new block size (see the LaunchedEffect(pickedFile, frameBytes)
-        // above); tx fps just changes the delay between frames and applies
-        // on the very next tick without interrupting the stream.
+        // Settings — bytes/frame and codes/frame both re-encode/re-render
+        // the current file at the new size (see the LaunchedEffect(phase)
+        // loop above, which reads codesPerFrame fresh every tick, and the
+        // LaunchedEffect(pickedFile, frameBytes) above that); tx fps just
+        // changes the delay between ticks and applies on the very next one
+        // without interrupting the stream.
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Bytes per frame", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -257,6 +282,20 @@ fun SendScreen(onBack: () -> Unit) {
                     FilterChip(
                         selected = option == frameBytes,
                         onClick = { frameBytes = option },
+                        label = { Text(option.toString()) },
+                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primary),
+                    )
+                }
+            }
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Codes per frame", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(CODES_PER_FRAME_OPTIONS) { option ->
+                    FilterChip(
+                        selected = option == codesPerFrame,
+                        onClick = { codesPerFrame = option },
                         label = { Text(option.toString()) },
                         colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primary),
                     )
@@ -274,6 +313,37 @@ fun SendScreen(onBack: () -> Unit) {
                         label = { Text(option.toString()) },
                         colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primary),
                     )
+                }
+            }
+        }
+    }
+}
+
+/** Lays out N independent QR codes as a roughly square grid — each one is
+ *  a standalone fountain frame with its own seq (see the streaming
+ *  LaunchedEffect above), so the receiver just needs to decode as many of
+ *  them per camera frame as it can (QrFrameAnalyzer already does). */
+@Composable
+private fun QrGrid(bitmaps: List<Bitmap>, modifier: Modifier = Modifier) {
+    val cols = ceil(sqrt(bitmaps.size.toFloat())).toInt().coerceAtLeast(1)
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        bitmaps.chunked(cols).forEach { rowBitmaps ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                rowBitmaps.forEach { bitmap ->
+                    Image(
+                        bitmap = bitmap.asImageBitmap(),
+                        contentDescription = "Animated QR code carrying part of the file",
+                        modifier = Modifier
+                            .weight(1f)
+                            .aspectRatio(1f)
+                            .background(androidx.compose.ui.graphics.Color.White, RoundedCornerShape(12.dp))
+                            .padding(8.dp),
+                    )
+                }
+                // A partial last row (e.g. 4 codes over 3 columns) still
+                // needs its cells sized like a full row, not stretched.
+                repeat(cols - rowBitmaps.size) {
+                    Box(modifier = Modifier.weight(1f))
                 }
             }
         }

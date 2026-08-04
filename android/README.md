@@ -44,11 +44,16 @@ Or just open `android/` in Android Studio — it's a standard Gradle project.
 
 Roughly in priority order:
 
-1. **Confirm the receive side on a real device** — camera permission flow,
-   CameraX binding on a real sensor, ML Kit decode latency at the frame rate
-   the sender now targets. The send side has had one round of real-device
-   testing and fixes; receive hasn't yet been confirmed working end-to-end
-   on physical hardware.
+1. **Confirm the multi-code grid on a real device** — the sender now shows
+   several independent QR codes per tick (default 4, `SendScreen.kt`'s
+   `QrGrid`/`codesPerFrame`) and `QrFrameAnalyzer` decodes every code ML
+   Kit finds per camera frame, not just the first — a research-grounded
+   throughput multiplier (see the screen-camera VLC / "visual MIMO" /
+   QR-grid literature), but unverified at real hand-held distance: more
+   codes per frame means each is physically smaller, which trades off
+   against decode reliability the further/shakier the camera is. Tap-to-
+   focus and continuous-video AF are already in to help with that side of
+   it.
 2. **Settings UI** — the sender now has tx fps / bytes-per-frame chips
    (`SendScreen.kt`, same option lists as the web app's
    `shared/send-settings.ts`); still missing: error correction level on the
