@@ -6,9 +6,12 @@ import android.content.pm.PackageManager
 import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import android.util.Size
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
@@ -182,8 +185,21 @@ private fun CameraPreview(onFrame: (ByteArray) -> Unit) {
                 val preview = Preview.Builder().build().also {
                     it.setSurfaceProvider(previewView.surfaceProvider)
                 }
+                // Without an explicit target, CameraX picks a default
+                // ImageAnalysis resolution per-device — on some sensors
+                // that's well above what a QR scan needs, and ML Kit's
+                // per-frame cost scales with pixel count. 1280x720 is
+                // comfortably enough detail to read a dense QR code at
+                // arm's length while keeping decode latency low and
+                // predictable across devices.
+                val resolutionSelector = ResolutionSelector.Builder()
+                    .setResolutionStrategy(
+                        ResolutionStrategy(Size(1280, 720), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER),
+                    )
+                    .build()
                 val analysis = ImageAnalysis.Builder()
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .setResolutionSelector(resolutionSelector)
                     .build()
                     .also { it.setAnalyzer(executor, QrFrameAnalyzer { bytes -> onFrameState.value(bytes) }) }
                 try {
