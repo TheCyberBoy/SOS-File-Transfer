@@ -301,11 +301,22 @@ private fun renderQrBitmap(frame: ByteArray): Bitmap {
     )
     val text = String(frame, Charsets.ISO_8859_1) // byte-preserving, matches the web sender's "byte" mode segment
     val matrix = QRCodeWriter().encode(text, BarcodeFormat.QR_CODE, 512, 512, hints)
-    val bmp = Bitmap.createBitmap(matrix.width, matrix.height, Bitmap.Config.ARGB_8888)
-    for (x in 0 until matrix.width) {
-        for (y in 0 until matrix.height) {
-            bmp.setPixel(x, y, if (matrix.get(x, y)) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+    val width = matrix.width
+    val height = matrix.height
+    // Bitmap.setPixel() crosses the JNI boundary once per call — doing that
+    // 512*512 (262,144) times per frame, every frame, is real per-frame cost
+    // stacked directly against the send loop's frame budget (e.g. ~42ms at
+    // 24 fps). Filling a plain IntArray in Kotlin and writing it in one
+    // setPixels() call is a single JNI transfer instead of a quarter
+    // million of them.
+    val pixels = IntArray(width * height)
+    var i = 0
+    for (y in 0 until height) {
+        for (x in 0 until width) {
+            pixels[i++] = if (matrix.get(x, y)) android.graphics.Color.BLACK else android.graphics.Color.WHITE
         }
     }
+    val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    bmp.setPixels(pixels, 0, width, 0, 0, width, height)
     return bmp
 }
