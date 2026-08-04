@@ -3,6 +3,8 @@ package com.novosoftlabs.sosfiletransfer.ui
 import android.Manifest
 import android.content.ContentValues
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -14,7 +16,10 @@ import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -36,9 +41,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -59,6 +66,9 @@ import com.novosoftlabs.sosfiletransfer.transfer.formatDuration
 import com.novosoftlabs.sosfiletransfer.transfer.goodputKbs
 import java.util.Locale
 import java.util.concurrent.Executors
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private data class ReceiveState(
     val status: String = "Ready to scan a file or text stream",
@@ -71,8 +81,49 @@ private data class ReceiveState(
     val done: Boolean = false,
     val resultText: String? = null,
     val savedName: String? = null,
+    val previewBitmap: Bitmap? = null,
     val error: String? = null,
 )
+
+/** What finishing a completed transfer can produce — kept off the main
+ *  thread (unpack/gzip/SHA-256/disk write/image decode are all real work),
+ *  then applied to [ReceiveState] once back on the composition's dispatcher. */
+private sealed interface FinishResult {
+    data class Snippet(val text: String) : FinishResult
+    data class SavedFile(val name: String, val previewBitmap: Bitmap?) : FinishResult
+    data class Error(val message: String) : FinishResult
+}
+
+private suspend fun finishReceivedTransfer(context: android.content.Context, payload: ByteArray): FinishResult =
+    withContext(Dispatchers.Default) {
+        try {
+            val file = unpackFile(payload)
+            if (!verifyFile(file)) throw IllegalStateException("SHA-256 verification failed.")
+            if (isSnippet(file)) {
+                FinishResult.Snippet(snippetText(file))
+            } else {
+                // Same idea as the web receiver showing an <img> for
+                // image/* payloads (receive/main.ts) — decoded here, off
+                // the main thread, since BitmapFactory isn't free for a
+                // multi-megabyte photo.
+                val preview = if (file.type.startsWith("image/")) {
+                    try {
+                        BitmapFactory.decodeByteArray(file.bytes, 0, file.bytes.size)
+                    } catch (e: Throwable) {
+                        android.util.Log.e("ReceiveScreen", "Failed to decode image preview", e)
+                        null
+                    }
+                } else {
+                    null
+                }
+                val saved = withContext(Dispatchers.IO) { saveToDownloads(context, file.name, file.type, file.bytes) }
+                FinishResult.SavedFile(saved, preview)
+            }
+        } catch (e: Throwable) {
+            android.util.Log.e("ReceiveScreen", "Failed to unpack/save received file", e)
+            FinishResult.Error(e.message ?: "Transfer failed.")
+        }
+    }
 
 @Composable
 fun ReceiveScreen(onBack: () -> Unit) {
@@ -87,6 +138,7 @@ fun ReceiveScreen(onBack: () -> Unit) {
 
     var state by remember { mutableStateOf(ReceiveState()) }
     val stateRef = rememberUpdatedState(state)
+    val scope = rememberCoroutineScope()
 
     fun onFrameDecoded(bytes: ByteArray) {
         // Runs off the ML Kit analyzer callback on every decoded frame — any
@@ -146,29 +198,40 @@ fun ReceiveScreen(onBack: () -> Unit) {
                 val payload = decoder.assemble()!!
                 val seconds = maxOf(0.0, (System.nanoTime() - current.startTs) / 1_000_000_000.0)
                 val ok = fnv1a(payload) == parsed.header.payloadFnv
+                // done = true now, before any of the heavier finishing work
+                // below runs — this callback fires on the main thread (ML
+                // Kit's Task listeners default there), so nothing past this
+                // point may block it: unpack/verify/save/decode all move to
+                // a coroutine on Dispatchers.Default/IO instead.
                 current = current.copy(
-                    status = "Done",
+                    done = true,
+                    status = if (ok) "Finishing…" else "Done",
                     progress = 1f,
-                    progressLabel = if (ok) "100% · file recovered" else "100%",
+                    progressLabel = "100%",
                     etaLabel = "${formatDuration(seconds)} total",
                 )
-                current = if (!ok) {
-                    current.copy(done = true, error = "The optical stream checksum did not match.")
+                state = current
+                if (!ok) {
+                    state = state.copy(status = "Done", error = "The optical stream checksum did not match.")
                 } else {
-                    try {
-                        val file = unpackFile(payload)
-                        if (!verifyFile(file)) throw IllegalStateException("SHA-256 verification failed.")
-                        if (isSnippet(file)) {
-                            current.copy(done = true, resultText = snippetText(file), progressLabel = "100% · text recovered")
-                        } else {
-                            val saved = saveToDownloads(context, file.name, file.type, file.bytes)
-                            current.copy(done = true, savedName = saved)
+                    scope.launch {
+                        when (val result = finishReceivedTransfer(context, payload)) {
+                            is FinishResult.Snippet -> state = state.copy(
+                                status = "Done",
+                                resultText = result.text,
+                                progressLabel = "100% · text recovered",
+                            )
+                            is FinishResult.SavedFile -> state = state.copy(
+                                status = "Done",
+                                savedName = result.name,
+                                previewBitmap = result.previewBitmap,
+                                progressLabel = "100% · file recovered",
+                            )
+                            is FinishResult.Error -> state = state.copy(status = "Done", error = result.message)
                         }
-                    } catch (e: Throwable) {
-                        android.util.Log.e("ReceiveScreen", "Failed to unpack/save received file", e)
-                        current.copy(done = true, error = e.message ?: "Transfer failed.")
                     }
                 }
+                return
             }
             state = current
         } catch (e: Throwable) {
@@ -182,6 +245,7 @@ fun ReceiveScreen(onBack: () -> Unit) {
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .windowInsetsPadding(WindowInsets.safeDrawing)
+            .verticalScroll(rememberScrollState())
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
@@ -220,6 +284,15 @@ fun ReceiveScreen(onBack: () -> Unit) {
         }
         state.savedName?.let {
             Text("Saved to Downloads: $it", color = MaterialTheme.colorScheme.primary)
+        }
+        state.previewBitmap?.let { bitmap ->
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = "Preview of the received file",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp)),
+            )
         }
     }
 }
