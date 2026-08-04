@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <script>
+      (function () {
+        var saved = null;
+        try { saved = localStorage.getItem("sos-theme"); } catch (e) {}
+        var theme = saved || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.style.colorScheme = theme;
+      })();
+    </script>
+    <!-- No scale lock here; see the 16px note on the settings controls in style.css. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>SOS File Transfer — receive</title>
+    <meta name="theme-color" content="#060b12" />
+    <link rel="icon" href="../sos_logo.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../shared/style.css" />
+  </head>
+  <body class="receiver-page">
+    <header class="site-header">
+      <a class="brand" href="../"><svg class="brand-logo" viewBox="0 0 32 32" fill="none" aria-hidden="true"><circle cx="8" cy="24" r="2.6" fill="currentColor" /><path d="M9.04 19.11 A5 5 0 0 1 12.89 22.96" stroke="currentColor" stroke-width="3.1" stroke-linecap="round" /><path d="M9.87 15.20 A9 9 0 0 1 16.80 22.13" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-opacity="0.72" /><path d="M10.70 11.28 A13 13 0 0 1 20.72 21.30" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-opacity="0.46" /></svg>SOS</a>
+      <nav class="pill-links" aria-label="Primary"><a class="pill-link" href="../send/">Send</a><a class="pill-link" href="../receive/" aria-current="page">Receive</a></nav>
+      <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Switch theme">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>
+      </button>
+    </header>
+    <main class="receiver-shell">
+      <div class="tool-grid">
+        <div class="tool-controls">
+          <div class="receiver-heading">
+            <div>
+              <p class="eyebrow">Camera → device</p>
+              <h1>Receive</h1>
+            </div>
+            <div class="hint status-line" id="stats">Ready to scan a file or text stream</div>
+          </div>
+          <details class="settings" id="settings">
+            <summary>Receive settings</summary>
+            <div class="row">
+              <label>capture width
+                <select id="cfg-width"><option>960</option><option selected>1280</option><option>1920</option></select>
+              </label>
+              <label>capture fps
+                <select id="cfg-capfps"><option>30</option><option selected>60</option></select>
+              </label>
+              <label>decode workers
+                <select id="cfg-workers"><option>1</option><option selected>2</option><option>3</option></select>
+              </label>
+            </div>
+            <p class="hint settings-actual" id="camera-actual">Applied when the camera starts.</p>
+          </details>
+          <details class="settings diagnostics" id="diagnostics" style="display: none">
+            <summary>Live diagnostics</summary>
+            <div class="metrics" id="metrics" style="display: none">
+              <div class="metric"><div class="k">capture fps</div><div class="v" id="m-cap">—</div></div>
+              <div class="metric"><div class="k">decode fps</div><div class="v amber" id="m-dec">—</div></div>
+              <div class="metric"><div class="k">goodput</div><div class="v amber" id="m-rate">—</div></div>
+              <div class="metric"><div class="k">elapsed</div><div class="v" id="m-time">—</div></div>
+              <div class="metric"><div class="k">frames new/dup</div><div class="v" id="m-frames">—</div></div>
+              <div class="metric"><div class="k">blocks K</div><div class="v" id="m-k">—</div></div>
+              <div class="metric"><div class="k">block len</div><div class="v" id="m-block">—</div></div>
+              <div class="metric"><div class="k">transfer</div><div class="v" id="m-payload">—</div></div>
+            </div>
+          </details>
+        </div>
+
+        <div class="tool-stage-pane">
+          <div class="stage-frame receiver-stage-frame">
+            <div class="stage-placeholder">
+              <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
+                <path d="M6 16v-6a4 4 0 0 1 4-4h6" />
+                <path d="M32 6h6a4 4 0 0 1 4 4v6" />
+                <path d="M6 32v6a4 4 0 0 0 4 4h6" />
+                <path d="M42 32v6a4 4 0 0 1-4 4h-6" />
+              </svg>
+              <p>Point this device's camera at the sender's screen.</p>
+              <button id="start">Start camera</button>
+            </div>
+            <div class="preview" id="preview" style="display: none">
+              <video id="video" muted playsinline></video>
+              <div class="transfer-hud">
+                <div class="progress-status" id="progress-status" style="display: none" aria-live="polite">
+                  <strong id="progress-label">0% · 0 frames</strong>
+                  <span id="eta-label">Estimating time…</span>
+                </div>
+                <div
+                  class="progress"
+                  id="progress"
+                  style="display: none"
+                  role="progressbar"
+                  aria-label="Transfer recovery progress"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  aria-valuenow="0"
+                ><div id="bar"></div></div>
+              </div>
+            </div>
+          </div>
+          <div id="result"></div>
+        </div>
+      </div>
+    </main>
+    <footer class="site-footer">
+      <span class="footer-id">
+        <span>SOS File Transfer · by Novosoft Labs</span>
+        <span>v%APP_VERSION% · build %BUILD_ID% · <a href="https://github.com/TheCyberBoy/SOS-File-Transfer/blob/main/LICENSE">MIT</a></span>
+      </span>
+      <nav class="footer-links" aria-label="Project links">
+        <a href="https://github.com/TheCyberBoy/SOS-File-Transfer">GitHub</a>
+        <a href="https://github.com/TheCyberBoy/SOS-File-Transfer/releases">Releases</a>
+      </nav>
+    </footer>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
