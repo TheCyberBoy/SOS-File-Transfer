@@ -328,6 +328,13 @@ fun ReceiveScreen(onBack: () -> Unit) {
                 Text("Open ${state.savedName}")
             }
         }
+
+        Text(
+            "SOS File Transfer · by Novosoft Labs",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            modifier = Modifier.padding(top = 8.dp, bottom = 24.dp),
+        )
     }
 }
 
