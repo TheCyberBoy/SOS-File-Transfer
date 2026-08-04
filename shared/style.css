@@ -301,6 +301,38 @@ button:focus-visible {
   background: #000;
   display: block;
 }
+/* Tap-to-focus feedback ring — receive/main.ts's tapToFocus(), same "focus
+   locked here" cue a real camera app gives on tap. */
+.focus-ring {
+  position: absolute;
+  width: 56px;
+  height: 56px;
+  margin-left: -28px;
+  margin-top: -28px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  pointer-events: none;
+  animation: focus-ring-pulse 0.9s ease-out forwards;
+}
+@keyframes focus-ring-pulse {
+  0% {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .focus-ring {
+    animation: none;
+    opacity: 0;
+  }
+}
 .progress {
   width: min(92vw, 480px);
   height: 14px;

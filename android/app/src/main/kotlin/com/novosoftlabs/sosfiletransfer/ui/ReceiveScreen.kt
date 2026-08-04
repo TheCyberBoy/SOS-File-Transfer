@@ -12,6 +12,7 @@ import android.net.Uri
 import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import android.util.Range
 import android.util.Size
 import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.core.Camera
@@ -388,10 +389,29 @@ private fun CameraPreview(onFrame: (ByteArray) -> Unit) {
                     // less — the mode Google's own ML Kit + CameraX barcode
                     // samples use, since a photo-tuned AF is the wrong
                     // trade-off for a live scan.
-                    Camera2Interop.Extender(previewBuilder).setCaptureRequestOption(
-                        CaptureRequest.CONTROL_AF_MODE,
-                        CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO,
-                    )
+                    //
+                    // CONTROL_AE_TARGET_FPS_RANGE addresses a different, real
+                    // failure mode: in a dim room, the default auto-exposure
+                    // is free to lengthen exposure time per frame instead of
+                    // raising ISO gain to stay bright — which silently caps
+                    // the achievable frame rate far below whatever fps the
+                    // sender is offering, well before anything about focus
+                    // or distance comes into play. Pinning a target range
+                    // forces AE to hold frame rate and compensate with gain
+                    // (more noise per frame) instead, trading per-frame
+                    // image quality for throughput — the right trade here,
+                    // since the fountain code already discards a bad frame
+                    // for free, but a frame the camera never captured at all
+                    // costs real time.
+                    Camera2Interop.Extender(previewBuilder)
+                        .setCaptureRequestOption(
+                            CaptureRequest.CONTROL_AF_MODE,
+                            CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO,
+                        )
+                        .setCaptureRequestOption(
+                            CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
+                            Range(20, 30),
+                        )
                     val preview = previewBuilder.build().also {
                         it.setSurfaceProvider(newPreviewView.surfaceProvider)
                     }
