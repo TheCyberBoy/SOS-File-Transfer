@@ -3,15 +3,16 @@ package com.novosoftlabs.sosfiletransfer.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -47,8 +48,9 @@ fun HomeScreen(onSend: () -> Unit, onReceive: () -> Unit) {
     LazyColumn(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.background),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
+            .background(MaterialTheme.colorScheme.background)
+            .windowInsetsPadding(WindowInsets.safeDrawing),
+        contentPadding = PaddingValues(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item {
@@ -92,9 +94,17 @@ fun HomeScreen(onSend: () -> Unit, onReceive: () -> Unit) {
             )
         }
 
-        item {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(stats) { stat -> StatChip(stat) }
+        // A 2x2 grid, not a horizontally-scrolling row — four fixed items
+        // never need scroll affordance, and a scrollable row inside a
+        // scrollable column reads as a mistake (worse: the last chip has no
+        // reliable way to signal "there's more" and was clipping at the
+        // screen edge instead). Mirrors the web app's own mobile breakpoint,
+        // which falls back to the same 2x2 layout for the same reason.
+        items(stats.chunked(2)) { rowStats ->
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                for (stat in rowStats) {
+                    StatChip(stat, modifier = Modifier.weight(1f))
+                }
             }
         }
 
@@ -175,10 +185,10 @@ private fun ActionCard(
 }
 
 @Composable
-private fun StatChip(stat: Stat) {
+private fun StatChip(stat: Stat, modifier: Modifier = Modifier) {
     Column(
-        modifier = Modifier
-            .size(width = 160.dp, height = 100.dp)
+        modifier = modifier
+            .height(100.dp)
             .background(MaterialTheme.calmSignal.glass, RoundedCornerShape(16.dp))
             .border(1.dp, MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.15f), RoundedCornerShape(16.dp))
             .padding(14.dp),

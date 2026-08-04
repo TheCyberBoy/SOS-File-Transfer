@@ -8,13 +8,18 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -23,6 +28,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
@@ -31,13 +37,14 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
+import com.novosoftlabs.sosfiletransfer.core.FrameHeader
 import com.novosoftlabs.sosfiletransfer.core.LTEncoder
 import com.novosoftlabs.sosfiletransfer.core.MAX_FILE_LABEL
 import com.novosoftlabs.sosfiletransfer.core.fnv1a
 import com.novosoftlabs.sosfiletransfer.core.packFile
 import com.novosoftlabs.sosfiletransfer.core.packFrame
-import com.novosoftlabs.sosfiletransfer.core.FrameHeader
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlin.random.Random
 
@@ -45,67 +52,90 @@ private const val FRAME_BYTES = 2953 // QR v40 ceiling, same default as the web 
 private const val BLOCK_LEN = FRAME_BYTES - com.novosoftlabs.sosfiletransfer.core.HEADER_LEN
 private const val TX_FPS = 20L // conservative default for a first pass; web defaults to 60
 
-private data class SendState(
-    val fileName: String = "",
-    val status: String = "Choose a file to begin",
-    val error: String? = null,
-    val encoder: LTEncoder? = null,
-    val header: FrameHeader? = null,
-)
+private sealed interface SendPhase {
+    data object Idle : SendPhase
+    data object Preparing : SendPhase
+    data class Streaming(val fileName: String, val status: String, val encoder: LTEncoder, val header: FrameHeader) : SendPhase
+    data class Failed(val message: String) : SendPhase
+}
 
 @Composable
 fun SendScreen(onBack: () -> Unit) {
     val context = LocalContext.current
-    var state by remember { mutableStateOf(SendState()) }
+    var phase by remember { mutableStateOf<SendPhase>(SendPhase.Idle) }
+    var pickedUri by remember { mutableStateOf<Uri?>(null) }
     var frameBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var seq by remember { mutableStateOf(0) }
 
     val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
-        try {
-            val resolver = context.contentResolver
-            val bytes = resolver.openInputStream(uri)?.use { it.readBytes() }
-                ?: throw IllegalStateException("Could not read the selected file.")
-            val name = queryDisplayName(context, uri) ?: "file"
-            val type = resolver.getType(uri)
-                ?: MimeTypeMap.getSingleton().getMimeTypeFromExtension(name.substringAfterLast('.', ""))
-                ?: "application/octet-stream"
+        phase = SendPhase.Preparing
+        pickedUri = uri
+    }
 
-            val packed = packFile(name, type, bytes)
-            val sessionId = Random.nextInt(1, 0xffff)
-            val encoder = LTEncoder(packed.container, BLOCK_LEN, sessionId)
-            val header = FrameHeader(
-                sessionId = sessionId,
-                seq = 0,
-                k = encoder.k,
-                blockLen = BLOCK_LEN,
-                totalLen = packed.container.size,
-                payloadFnv = fnv1a(packed.container),
-            )
+    // All the actual work — file read, gzip, SHA-256, fountain-code block
+    // allocation — happens here, off the main thread. Doing this inline in
+    // the picker callback above is what crashed the app: that callback runs
+    // on the UI thread, and a large-enough file turns a blocking read plus a
+    // few full-size byte-array copies into either a frozen UI or an
+    // OutOfMemoryError that a plain `catch (e: Exception)` never sees.
+    LaunchedEffect(pickedUri) {
+        val uri = pickedUri ?: return@LaunchedEffect
+        try {
+            val (name, type, bytes) = withContext(Dispatchers.IO) {
+                val resolver = context.contentResolver
+                val readBytes = resolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: throw IllegalStateException("Could not read the selected file.")
+                val displayName = queryDisplayName(context, uri) ?: "file"
+                val mimeType = resolver.getType(uri)
+                    ?: MimeTypeMap.getSingleton().getMimeTypeFromExtension(displayName.substringAfterLast('.', ""))
+                    ?: "application/octet-stream"
+                Triple(displayName, mimeType, readBytes)
+            }
+
+            val (encoder, header, statusLine) = withContext(Dispatchers.Default) {
+                val packed = packFile(name, type, bytes)
+                val sessionId = Random.nextInt(1, 0xffff)
+                val enc = LTEncoder(packed.container, BLOCK_LEN, sessionId)
+                val hdr = FrameHeader(
+                    sessionId = sessionId,
+                    seq = 0,
+                    k = enc.k,
+                    blockLen = BLOCK_LEN,
+                    totalLen = packed.container.size,
+                    payloadFnv = fnv1a(packed.container),
+                )
+                val status = "$TX_FPS FPS · $FRAME_BYTES bytes/frame · ${packed.compression} · K=${enc.k}"
+                Triple(enc, hdr, status)
+            }
+
             seq = 0
-            state = SendState(
-                fileName = name,
-                status = "$TX_FPS FPS · $FRAME_BYTES bytes/frame · ${packed.compression} · K=${encoder.k}",
-                encoder = encoder,
-                header = header,
-            )
+            frameBitmap = null
+            phase = SendPhase.Streaming(name, statusLine, encoder, header)
+        } catch (e: OutOfMemoryError) {
+            phase = SendPhase.Failed("That file is too large for this device to prepare right now — try a smaller one.")
         } catch (e: Exception) {
-            state = state.copy(error = e.message ?: "Could not prepare that file.")
+            phase = SendPhase.Failed(e.message ?: "Could not prepare that file.")
         }
     }
 
     // Drives the animated QR stream once a file is selected — regenerates a
     // new frame every tick, same idea as the web sender's rAF loop, just on a
-    // fixed-rate coroutine delay instead.
-    LaunchedEffect(state.encoder) {
-        val encoder = state.encoder ?: return@LaunchedEffect
-        val header = state.header ?: return@LaunchedEffect
+    // fixed-rate coroutine delay instead. Wrapped in try/catch so a bad frame
+    // shows an error instead of taking the whole app down with it.
+    LaunchedEffect(phase) {
+        val streaming = phase as? SendPhase.Streaming ?: return@LaunchedEffect
         while (true) {
-            val block = encoder.encode(seq)
-            val frame = packFrame(header.copy(seq = seq), block)
-            frameBitmap = withContext(Dispatchers.Default) { renderQrBitmap(frame) }
-            seq++
-            kotlinx.coroutines.delay(1000L / TX_FPS)
+            try {
+                val block = streaming.encoder.encode(seq)
+                val frame = packFrame(streaming.header.copy(seq = seq), block)
+                frameBitmap = withContext(Dispatchers.Default) { renderQrBitmap(frame) }
+                seq++
+            } catch (e: Exception) {
+                phase = SendPhase.Failed(e.message ?: "The stream stopped unexpectedly.")
+                return@LaunchedEffect
+            }
+            delay(1000L / TX_FPS)
         }
     }
 
@@ -113,28 +143,54 @@ fun SendScreen(onBack: () -> Unit) {
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
+            .windowInsetsPadding(WindowInsets.safeDrawing)
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text("Send a file", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.onBackground)
-        Text(state.status, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        state.error?.let {
-            Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+
+        val statusText = when (val p = phase) {
+            is SendPhase.Idle -> "Choose a file to begin"
+            is SendPhase.Preparing -> "Preparing…"
+            is SendPhase.Streaming -> p.status
+            is SendPhase.Failed -> p.message
         }
-        Button(onClick = { pickFile.launch("*/*") }) {
-            Text(if (state.fileName.isEmpty()) "Choose file (up to $MAX_FILE_LABEL)" else state.fileName)
+        Text(
+            statusText,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (phase is SendPhase.Failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Button(onClick = { pickFile.launch("*/*") }, enabled = phase !is SendPhase.Preparing) {
+            val label = (phase as? SendPhase.Streaming)?.fileName
+            Text(label ?: "Choose file (up to $MAX_FILE_LABEL)")
         }
 
-        frameBitmap?.let { bmp ->
-            Image(
-                bitmap = bmp.asImageBitmap(),
-                contentDescription = "Animated QR code carrying the file",
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1f)
-                    .background(androidx.compose.ui.graphics.Color.White, RoundedCornerShape(16.dp))
-                    .padding(16.dp),
-            )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            when {
+                phase is SendPhase.Preparing -> CircularProgressIndicator()
+                frameBitmap != null -> Image(
+                    bitmap = frameBitmap!!.asImageBitmap(),
+                    contentDescription = "Animated QR code carrying the file",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1f)
+                        .background(androidx.compose.ui.graphics.Color.White, RoundedCornerShape(16.dp))
+                        .padding(16.dp),
+                )
+                else -> Text(
+                    "Your animated code will appear here",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(24.dp),
+                )
+            }
         }
     }
 }
