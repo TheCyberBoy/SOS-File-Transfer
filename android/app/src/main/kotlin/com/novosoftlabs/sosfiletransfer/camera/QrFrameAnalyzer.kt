@@ -19,6 +19,13 @@ import com.google.mlkit.vision.common.InputImage
  * measurable per-frame overhead this stream never needed. Effective decode
  * throughput, not the sender's fps setting, is what actually caps transfer
  * speed on a fountain-coded one-way link like this one.
+ *
+ * `process()` already returns every QR code ML Kit finds in the image, not
+ * just one — this is the receiving half of the sender's multi-code grid
+ * (SendScreen's QrGrid): each detected code is an independent fountain
+ * frame with its own seq, so decoding all of them per camera frame instead
+ * of only the first is a direct N× throughput multiplier with no protocol
+ * change at all.
  */
 class QrFrameAnalyzer(private val onDecoded: (ByteArray) -> Unit) : ImageAnalysis.Analyzer {
     private val scanner = BarcodeScanning.getClient(
@@ -37,8 +44,10 @@ class QrFrameAnalyzer(private val onDecoded: (ByteArray) -> Unit) : ImageAnalysi
         val image = InputImage.fromMediaImage(imageProxy.image!!, imageProxy.imageInfo.rotationDegrees)
         scanner.process(image)
             .addOnSuccessListener { barcodes ->
-                val raw = barcodes.firstOrNull { it.format == Barcode.FORMAT_QR_CODE }?.rawBytes
-                if (raw != null) onDecoded(raw)
+                for (barcode in barcodes) {
+                    val raw = barcode.rawBytes ?: continue
+                    onDecoded(raw)
+                }
             }
             .addOnCompleteListener {
                 busy = false
