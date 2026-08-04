@@ -77,45 +77,55 @@ fun ReceiveScreen(onBack: () -> Unit) {
     val stateRef = rememberUpdatedState(state)
 
     fun onFrameDecoded(bytes: ByteArray) {
-        val parsed = parseFrame(bytes) ?: return
-        if (stateRef.value.done) return
-        val identity = streamIdentity(parsed.header)
-        var current = stateRef.value
-        if (current.decoder == null || current.streamKey != identity) {
+        // Runs off the ML Kit analyzer callback on every decoded frame — any
+        // uncaught throw here (a malformed frame, a corrupt in-flight
+        // decoder state) would crash the whole app mid-scan, so nothing
+        // escapes this function silently.
+        try {
+            val parsed = parseFrame(bytes) ?: return
+            if (stateRef.value.done) return
+            val identity = streamIdentity(parsed.header)
+            var current = stateRef.value
+            if (current.decoder == null || current.streamKey != identity) {
+                current = current.copy(
+                    decoder = LTDecoder(parsed.header.k, parsed.header.blockLen, parsed.header.sessionId, parsed.header.totalLen),
+                    streamKey = identity,
+                )
+            }
+            val decoder = current.decoder!!
+            decoder.addFrame(parsed.header.seq, parsed.block)
+            val progress = decoder.solvedCount.toFloat() / decoder.k.toFloat()
             current = current.copy(
-                decoder = LTDecoder(parsed.header.k, parsed.header.blockLen, parsed.header.sessionId, parsed.header.totalLen),
-                streamKey = identity,
+                progress = progress,
+                status = "${decoder.solvedCount}/${decoder.k} blocks · ${decoder.framesNew} frames",
             )
-        }
-        val decoder = current.decoder!!
-        decoder.addFrame(parsed.header.seq, parsed.block)
-        val progress = decoder.solvedCount.toFloat() / decoder.k.toFloat()
-        current = current.copy(
-            progress = progress,
-            status = "${decoder.solvedCount}/${decoder.k} blocks · ${decoder.framesNew} frames",
-        )
 
-        if (decoder.isComplete) {
-            val payload = decoder.assemble()!!
-            val ok = fnv1a(payload) == parsed.header.payloadFnv
-            current = if (!ok) {
-                current.copy(done = true, error = "The optical stream checksum did not match.")
-            } else {
-                try {
-                    val file = unpackFile(payload)
-                    if (!verifyFile(file)) throw IllegalStateException("SHA-256 verification failed.")
-                    if (isSnippet(file)) {
-                        current.copy(done = true, resultText = snippetText(file))
-                    } else {
-                        val saved = saveToDownloads(context, file.name, file.type, file.bytes)
-                        current.copy(done = true, savedName = saved)
+            if (decoder.isComplete) {
+                val payload = decoder.assemble()!!
+                val ok = fnv1a(payload) == parsed.header.payloadFnv
+                current = if (!ok) {
+                    current.copy(done = true, error = "The optical stream checksum did not match.")
+                } else {
+                    try {
+                        val file = unpackFile(payload)
+                        if (!verifyFile(file)) throw IllegalStateException("SHA-256 verification failed.")
+                        if (isSnippet(file)) {
+                            current.copy(done = true, resultText = snippetText(file))
+                        } else {
+                            val saved = saveToDownloads(context, file.name, file.type, file.bytes)
+                            current.copy(done = true, savedName = saved)
+                        }
+                    } catch (e: Throwable) {
+                        android.util.Log.e("ReceiveScreen", "Failed to unpack/save received file", e)
+                        current.copy(done = true, error = e.message ?: "Transfer failed.")
                     }
-                } catch (e: Exception) {
-                    current.copy(done = true, error = e.message ?: "Transfer failed.")
                 }
             }
+            state = current
+        } catch (e: Throwable) {
+            android.util.Log.e("ReceiveScreen", "Failed to process decoded frame", e)
+            state = stateRef.value.copy(done = true, error = e.message ?: "The optical stream failed unexpectedly.")
         }
-        state = current
     }
 
     Column(

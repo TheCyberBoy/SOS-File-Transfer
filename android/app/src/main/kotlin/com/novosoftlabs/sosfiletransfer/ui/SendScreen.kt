@@ -48,7 +48,15 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlin.random.Random
 
-private const val FRAME_BYTES = 2953 // QR v40 ceiling, same default as the web sender
+// The web sender defaults to 2953 bytes/frame — the exact byte ceiling of a
+// QR v40-L code, zero margin. That's fine for zxing-wasm (battle-tested at
+// that exact boundary), but zxing-core's Java encoder hasn't been verified
+// there and a boundary condition (mode/terminator bit accounting right at
+// max capacity) is a very plausible source of an encode-time crash. Use the
+// same safer fallback the web app's own README recommends when the max
+// setting misbehaves — real margin below any version's ceiling — instead of
+// chasing the untested boundary.
+private const val FRAME_BYTES = 1465 // QR v27-L, comfortable margin below capacity
 private const val BLOCK_LEN = FRAME_BYTES - com.novosoftlabs.sosfiletransfer.core.HEADER_LEN
 private const val TX_FPS = 20L // conservative default for a first pass; web defaults to 60
 
@@ -113,8 +121,14 @@ fun SendScreen(onBack: () -> Unit) {
             frameBitmap = null
             phase = SendPhase.Streaming(name, statusLine, encoder, header)
         } catch (e: OutOfMemoryError) {
+            android.util.Log.e("SendScreen", "OOM preparing file", e)
             phase = SendPhase.Failed("That file is too large for this device to prepare right now — try a smaller one.")
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            // Throwable, not Exception — a library-internal Error (e.g. from
+            // zxing/ML Kit's native bits) must never take the whole app down
+            // silently. Logged so `adb logcat` shows the real cause instead
+            // of just a generic message on screen.
+            android.util.Log.e("SendScreen", "Failed to prepare file for sending", e)
             phase = SendPhase.Failed(e.message ?: "Could not prepare that file.")
         }
     }
@@ -131,7 +145,8 @@ fun SendScreen(onBack: () -> Unit) {
                 val frame = packFrame(streaming.header.copy(seq = seq), block)
                 frameBitmap = withContext(Dispatchers.Default) { renderQrBitmap(frame) }
                 seq++
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
+                android.util.Log.e("SendScreen", "Failed to render QR frame $seq", e)
                 phase = SendPhase.Failed(e.message ?: "The stream stopped unexpectedly.")
                 return@LaunchedEffect
             }
