@@ -11,7 +11,7 @@ By [Novosoft Labs](https://novosoftlabs.com/)
 [![Node](https://img.shields.io/badge/node-%3E%3D22-6fb8ff.svg)](package.json)
 [![Build](https://github.com/TheCyberBoy/SOS-File-Transfer/actions/workflows/ci.yml/badge.svg)](https://github.com/TheCyberBoy/SOS-File-Transfer/actions/workflows/ci.yml)
 
-[Live demo](#try-it) · [How it works](#how-it-works) · [Deploying](#deploying) · [License](#license)
+[Live demo](https://thecyberboy.github.io/SOS-File-Transfer/) · [How it works](#how-it-works) · [Deploying](#deploying) · [License](#license)
 
 </div>
 
@@ -56,6 +56,8 @@ not confidentiality — anything on the sending screen is readable by any
 camera pointed at it.
 
 ## Try it
+
+The hosted build is live at **[thecyberboy.github.io/SOS-File-Transfer](https://thecyberboy.github.io/SOS-File-Transfer/)** — open [`/send/`](https://thecyberboy.github.io/SOS-File-Transfer/send/) on one device and [`/receive/`](https://thecyberboy.github.io/SOS-File-Transfer/receive/) on another, no install needed. To run it locally instead:
 
 ```bash
 git clone https://github.com/TheCyberBoy/SOS-File-Transfer.git
@@ -161,10 +163,12 @@ Four GitHub Actions workflows drive this, all in `.github/workflows`:
   hosted `receive` bundle stays under 20 KB (catches the standalone build's
   inlined WASM/worker leaking where it shouldn't), and that every page's
   PWA references resolve to real files.
-- **`pages.yml`** — deploys to GitHub Pages on every push to `main`. Enable
-  once under **Settings → Pages → Source → GitHub Actions**.
+- **`pages.yml`** — deploys to GitHub Pages on every push to `main`. Live at
+  [thecyberboy.github.io/SOS-File-Transfer](https://thecyberboy.github.io/SOS-File-Transfer/).
 - **`release.yml`** — on a `v*` tag, builds everything and attaches the site
-  zip, both standalone HTML files, and a `SHA256SUMS.txt` to the release.
+  zip, both standalone HTML files, a debug-signed Android APK, and a
+  `SHA256SUMS.txt` to the release. See [Releases](https://github.com/TheCyberBoy/SOS-File-Transfer/releases)
+  for the latest build of each.
 - **`android.yml`** — on every push/PR touching `android/`: runs the
   `:core` codec's golden-vector tests, then builds a debug APK and uploads
   it as a workflow artifact (Actions tab → the run → Artifacts) — the
