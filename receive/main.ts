@@ -60,7 +60,23 @@ let startTs = 0;
 let captureGen = 0;
 let done = false;
 let settingsWired = false;
+let previewTapWired = false;
 let statsTimer: ReturnType<typeof setInterval> | undefined;
+
+// Image Capture API constraints (tap-to-focus/expose) — not in lib.dom's
+// MediaTrackConstraintSet/MediaTrackCapabilities, and support is
+// inconsistent outside Chrome for Android, hence the feature-detected
+// `caps?.pointsOfInterest` guard in tapToFocus() rather than assuming it.
+interface ExtendedTrackCapabilities extends MediaTrackCapabilities {
+  pointsOfInterest?: unknown;
+  focusMode?: string[];
+  exposureMode?: string[];
+}
+interface PointOfInterestConstraintSet extends MediaTrackConstraintSet {
+  pointsOfInterest?: { x: number; y: number }[];
+  focusMode?: string;
+  exposureMode?: string;
+}
 
 const noSignal = new NoSignalHintTimer(NO_SIGNAL_AFTER_MS);
 const pool = new DecodeWorkerPool(createDecodeWorker, (bytes) => onDecoded(bytes));
@@ -160,12 +176,85 @@ async function start() {
       el.addEventListener("change", () => void applyReceiveSettings());
     }
   }
+  if (!previewTapWired) {
+    previewTapWired = true;
+    preview.addEventListener("click", (e) => {
+      // Only the bare video surface, not the HUD (progress bar, labels)
+      // layered on top of it in the split-pane desktop layout.
+      if (e.target !== video) return;
+      void tapToFocus(e.clientX, e.clientY);
+    });
+  }
 
   noSignal.cameraStarted(performance.now());
   captureGen++;
   scheduleFrame(captureGen);
   statsTimer = setInterval(updateStats, 500);
   await requestScreenWakeLock();
+}
+
+/** Tap-to-meter: the camera's default whole-frame exposure metering can
+ *  under-expose a bright screen sitting in an otherwise dark room — it's
+ *  trying to brighten the dark background too, which silently lengthens
+ *  exposure time and caps the achievable frame rate well before distance
+ *  or focus become the limiting factor. Re-pointing the camera's own
+ *  metering region at the QR code fixes the cause directly, the same idea
+ *  as tap-to-focus in any camera app. Feature-detected and a no-op where
+ *  the browser/device doesn't expose `pointsOfInterest` — Image Capture
+ *  API constraint support is inconsistent outside Chrome for Android. */
+async function tapToFocus(clientX: number, clientY: number) {
+  const track = stream?.getVideoTracks()[0];
+  if (!track) return;
+  const caps = track.getCapabilities?.() as ExtendedTrackCapabilities | undefined;
+  if (!caps?.pointsOfInterest) return;
+
+  const rect = video.getBoundingClientRect();
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  if (!vw || !vh || rect.width === 0 || rect.height === 0) return;
+
+  // Inverse of object-fit: cover — the split-pane desktop layout crops the
+  // video to fill its box; the base/mobile layout doesn't (height tracks
+  // the video's own aspect ratio), which this reduces to correctly since
+  // there's no crop to invert in that case.
+  const elementAspect = rect.width / rect.height;
+  const videoAspect = vw / vh;
+  let scale: number;
+  let offsetX = 0;
+  let offsetY = 0;
+  if (videoAspect > elementAspect) {
+    scale = rect.height / vh;
+    offsetX = (vw * scale - rect.width) / 2;
+  } else {
+    scale = rect.width / vw;
+    offsetY = (vh * scale - rect.height) / 2;
+  }
+  const x = (clientX - rect.left + offsetX) / scale / vw;
+  const y = (clientY - rect.top + offsetY) / scale / vh;
+  if (x < 0 || x > 1 || y < 0 || y > 1) return;
+
+  const advanced: PointOfInterestConstraintSet = { pointsOfInterest: [{ x, y }] };
+  if (caps.focusMode?.includes("continuous")) advanced.focusMode = "continuous";
+  if (caps.exposureMode?.includes("continuous")) advanced.exposureMode = "continuous";
+  try {
+    await track.applyConstraints({ advanced: [advanced] });
+    showFocusRing(clientX - rect.left, clientY - rect.top);
+  } catch {
+    // Some devices accept the capability query but reject the actual
+    // constraint combination — nothing to recover from, just drop it.
+  }
+}
+
+/** Same "focus locked here" feedback a real camera app gives on tap, so
+ *  tapping doesn't feel like it did nothing even when applyConstraints()
+ *  silently changes nothing visible in the feed itself. */
+function showFocusRing(x: number, y: number) {
+  const ring = document.createElement("div");
+  ring.className = "focus-ring";
+  ring.style.left = `${x}px`;
+  ring.style.top = `${y}px`;
+  ring.addEventListener("animationend", () => ring.remove());
+  preview.appendChild(ring);
 }
 
 /** Report what the camera actually negotiated — iOS in particular will happily
