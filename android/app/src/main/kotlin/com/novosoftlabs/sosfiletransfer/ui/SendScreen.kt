@@ -64,7 +64,13 @@ import kotlin.random.Random
 private val FRAME_BYTES_OPTIONS = listOf(500, 1000, 1465, 1850, 2331, 2953)
 private val TX_FPS_OPTIONS = listOf(10, 15, 20, 24, 30, 60)
 private const val DEFAULT_FRAME_BYTES = 1465 // QR v27-L, comfortable margin below capacity
-private const val DEFAULT_TX_FPS = 20
+// 24, not 20 — this is literally the web app's own "if it's struggling"
+// recovery pair (README: "bytes / frame → 1465, tx fps → 24"), so it's
+// already the conservative choice, not a risk. The real throughput limiter
+// on a fountain-coded link is how fast the *receiver* can decode frames,
+// not how many the sender offers — see QrFrameAnalyzer's format
+// restriction and ReceiveScreen's resolution cap for the actual speed fix.
+private const val DEFAULT_TX_FPS = 24
 
 private sealed interface SendPhase {
     data object Idle : SendPhase
