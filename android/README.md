@@ -26,6 +26,18 @@ wire format as the web app in `../send`, `../receive` and `../shared`.
   which this app uses instead. Still genuinely unverified: sustained
   multi-minute transfers, low-end/low-RAM devices, and the receive side's
   CameraX/ML Kit path end-to-end on a physical camera.
+- **Received-file preview** (`FilePreview.kt`) — images, PDFs (first page,
+  via the built-in `PdfRenderer`, no library), video/audio (inline via
+  Media3 `ExoPlayer`), and plain text all get a real in-app preview.
+  Word/Excel/PowerPoint and anything else fall back to the "Open" button
+  (`ACTION_VIEW`, hands off to whatever app the OS considers the right
+  viewer) — there's no built-in Android renderer for OOXML formats, and
+  building one would mean either a heavy proprietary library or a cloud
+  conversion API that breaks this app's whole no-network premise, so that's
+  a deliberate scope boundary, not a gap to fill later. Media3 is pinned to
+  1.6.0, not the latest (1.11.0 requires compileSdk 36; this project is on
+  35, and bumping that is a bigger, harder-to-verify change than this
+  feature itself).
 
 ## Build
 

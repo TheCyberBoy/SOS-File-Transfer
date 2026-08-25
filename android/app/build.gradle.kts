@@ -59,6 +59,15 @@ dependencies {
     implementation("com.google.mlkit:barcode-scanning:17.3.0")
     implementation("com.google.zxing:core:3.5.3")
 
+    // In-app preview for received video/audio files. PDF preview uses the
+    // built-in android.graphics.pdf.PdfRenderer instead — no library needed.
+    // Pinned below the latest (1.11.0, which requires compileSdk 36) since
+    // this project is on compileSdk 35 — bumping that is a bigger, harder
+    // to verify change than this app's own code, and 1.6.0 is still a
+    // fully current, well-supported Media3 release.
+    implementation("androidx.media3:media3-exoplayer:1.6.0")
+    implementation("androidx.media3:media3-ui:1.6.0")
+
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
     testImplementation("junit:junit:4.13.2")

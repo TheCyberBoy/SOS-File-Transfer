@@ -5,8 +5,6 @@ import android.content.ActivityNotFoundException
 import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.hardware.camera2.CaptureRequest
 import android.net.Uri
 import android.provider.MediaStore
@@ -61,6 +59,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -106,7 +105,7 @@ private data class ReceiveState(
     val savedName: String? = null,
     val savedUri: Uri? = null,
     val savedMimeType: String? = null,
-    val previewBitmap: Bitmap? = null,
+    val preview: FilePreview = FilePreview(PreviewKind.NONE),
     val error: String? = null,
 )
 
@@ -115,7 +114,7 @@ private data class ReceiveState(
  *  then applied to [ReceiveState] once back on the composition's dispatcher. */
 private sealed interface FinishResult {
     data class Snippet(val text: String) : FinishResult
-    data class SavedFile(val name: String, val uri: Uri, val mimeType: String, val previewBitmap: Bitmap?) : FinishResult
+    data class SavedFile(val name: String, val uri: Uri, val mimeType: String, val preview: FilePreview) : FinishResult
     data class Error(val message: String) : FinishResult
 }
 
@@ -127,21 +126,10 @@ private suspend fun finishReceivedTransfer(context: android.content.Context, pay
             if (isSnippet(file)) {
                 FinishResult.Snippet(snippetText(file))
             } else {
-                // Same idea as the web receiver showing an <img> for
-                // image/* payloads (receive/main.ts) — decoded here, off
-                // the main thread, since BitmapFactory isn't free for a
-                // multi-megabyte photo.
-                val preview = if (file.type.startsWith("image/")) {
-                    try {
-                        BitmapFactory.decodeByteArray(file.bytes, 0, file.bytes.size)
-                    } catch (e: Throwable) {
-                        android.util.Log.e("ReceiveScreen", "Failed to decode image preview", e)
-                        null
-                    }
-                } else {
-                    null
-                }
+                // Preview needs the saved Uri (PdfRenderer requires a real,
+                // seekable file descriptor), so save first.
                 val savedUri = withContext(Dispatchers.IO) { saveToDownloads(context, file.name, file.type, file.bytes) }
+                val preview = buildFilePreview(context, file.type, file.bytes, savedUri)
                 FinishResult.SavedFile(file.name, savedUri, file.type, preview)
             }
         } catch (e: Throwable) {
@@ -251,7 +239,7 @@ fun ReceiveScreen(onBack: () -> Unit) {
                                 savedName = result.name,
                                 savedUri = result.uri,
                                 savedMimeType = result.mimeType,
-                                previewBitmap = result.previewBitmap,
+                                preview = result.preview,
                                 progressLabel = "100% · file recovered",
                             )
                             is FinishResult.Error -> state = state.copy(status = "Done", error = result.message)
@@ -312,14 +300,41 @@ fun ReceiveScreen(onBack: () -> Unit) {
         state.savedName?.let {
             Text("Saved to Downloads: $it", color = MaterialTheme.colorScheme.primary)
         }
-        state.previewBitmap?.let { bitmap ->
-            Image(
-                bitmap = bitmap.asImageBitmap(),
-                contentDescription = "Preview of the received file",
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp)),
-            )
+        // As much in-app preview as an offline Android app can honestly
+        // offer: images and PDFs render straight from decoded/rendered
+        // bitmaps, video/audio play inline via Media3, plain text shows
+        // in a scrollable pane. Word/Excel/PowerPoint and anything else
+        // fall through to NONE — there's no built-in Android renderer for
+        // OOXML formats, and building one means either a heavy proprietary
+        // library or a cloud conversion API that would break this app's
+        // whole no-network premise, so those rely on the Open button below
+        // handing off to a real Office-capable app instead.
+        when (state.preview.kind) {
+            PreviewKind.IMAGE, PreviewKind.PDF -> state.preview.bitmap?.let { bitmap ->
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Image(
+                        bitmap = bitmap.asImageBitmap(),
+                        contentDescription = "Preview of the received file",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp)),
+                    )
+                    state.preview.caption?.let {
+                        Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            PreviewKind.VIDEO, PreviewKind.AUDIO -> state.savedUri?.let { uri ->
+                MediaPreviewPlayer(
+                    uri = uri,
+                    isAudioOnly = state.preview.kind == PreviewKind.AUDIO,
+                    modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp)),
+                )
+            }
+            PreviewKind.TEXT -> state.preview.text?.let { text ->
+                TextFilePreview(text, state.preview.textTruncated, modifier = Modifier.clip(RoundedCornerShape(12.dp)))
+            }
+            PreviewKind.NONE -> {}
         }
         if (state.savedUri != null) {
             Button(onClick = {
