@@ -4,3 +4,7 @@ dist/
 .DS_Store
 dist-standalone/
 artifacts/
+.agents/
+.claude-flow/
+.claude/
+skills-lock.json
